@@ -1,0 +1,15 @@
+[submodule "lib/websocket"]
+	path = lib/websocket
+	url = https://github.com/karlseguin/websocket.zig
+[submodule "lib/zbor"]
+	path = lib/zbor
+	url = https://github.com/r4gus/zbor.git
+[submodule "lib/kissfft"]
+	path = lib/kissfft
+	url = https://github.com/mborgerding/kissfft
+[submodule "lib/zig-gamedev"]
+	path = lib/zig-gamedev
+	url = https://github.com/michal-z/zig-gamedev
+[submodule "lib/rnnoise"]
+	path = lib/rnnoise
+	url = https://github.com/xiph/rnnoise
