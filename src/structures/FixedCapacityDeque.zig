@@ -1,18 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-fn optUToI(unsigned: ?usize) ?isize {
-    return if (unsigned) |u| @intCast(isize, u) else null;
-}
-
-fn uToI(u: usize) isize {
-    return @intCast(isize, u);
-}
-
-fn iToU(i: isize) usize {
-    return @intCast(usize, i);
-}
-
+/// A generic fixed-capacity double-ended queue.
 pub fn FixedCapacityDeque(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -96,10 +85,7 @@ pub fn FixedCapacityDeque(comptime T: type) type {
                 self.head = null;
                 self.tail = null;
             } else {
-                const head_i = uToI(self.head.?);
-                const capacity_i = uToI(self.capacity());
-                const next_head_i = @mod(head_i - 1, capacity_i);
-                self.head = iToU(next_head_i);
+                self.head = @mod(self.head.? + self.capacity() - 1, self.capacity());
             }
 
             return el;

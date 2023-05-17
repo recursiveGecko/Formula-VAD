@@ -2,9 +2,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 /// `SplitSlice` is a generic data structure comprised of two slices.
-/// `SplitSlice` is useful when data is read from a circular buffer which may wrap
-/// around the end of the buffer. In that scenario, a SplitSlice can represent a section
-/// of the data without having to create a copy.
+/// It's useful when data is read from a circular buffer which may wrap
+/// around the end of the buffer. In that scenario it can represent a section
+/// of data that isn't contiguous in memory without having to create a copy.
 pub fn SplitSlice(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -13,9 +13,8 @@ pub fn SplitSlice(comptime T: type) type {
         first: []const T,
         second: []const T = &.{},
         allocator: ?Allocator = null,
-        // Which slices to free when deinit is called.
-        // 1 = first, 2 = both
-        to_free: usize = 0,
+        /// Which slices to free when deinit is called.
+        owned_slices: enum { none, first, second, both } = .none,
 
         pub fn initWithCapacity(allocator: Allocator, length: usize) !Self {
             var data = try allocator.alloc(T, length);
@@ -25,7 +24,7 @@ pub fn SplitSlice(comptime T: type) type {
                 .id = undefined,
                 .first = data,
                 .allocator = allocator,
-                .to_free = 1,
+                .owned_slices = .first,
             };
 
             return self;
@@ -57,7 +56,7 @@ pub fn SplitSlice(comptime T: type) type {
                 .id = self.id,
                 .first = data,
                 .allocator = allocator,
-                .to_free = 1,
+                .owned_slices = .first,
             };
 
             return new_self;
@@ -65,10 +64,17 @@ pub fn SplitSlice(comptime T: type) type {
 
         pub fn deinit(self: *Self) void {
             if (self.allocator) |allocator| {
-                if (self.to_free >= 1) allocator.free(self.first);
-                if (self.to_free >= 2) allocator.free(self.second);
+                switch (self.owned_slices) {
+                    .none => {},
+                    .first => allocator.free(self.first),
+                    .second => allocator.free(self.second),
+                    .both => {
+                        allocator.free(self.first);
+                        allocator.free(self.second);
+                    },
+                }
 
-                self.to_free = 0;
+                self.owned_slices = .none;
             }
         }
     };

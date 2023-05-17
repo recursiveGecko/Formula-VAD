@@ -1,3 +1,7 @@
+//! SegmentWriter can pack multiple segments into a single, larger
+//! segment or split larger segments into multiple smaller segments.
+//! This is useful for stages of the audio pipeline that need to
+//! operate on different segment sizes.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Segment = @import("./Segment.zig");

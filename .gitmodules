@@ -13,3 +13,6 @@
 [submodule "lib/rnnoise"]
 	path = lib/rnnoise
 	url = https://github.com/xiph/rnnoise
+[submodule "lib/zig-clap"]
+	path = lib/zig-clap
+	url = https://github.com/Hejsil/zig-clap

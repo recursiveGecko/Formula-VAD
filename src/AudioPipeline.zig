@@ -199,17 +199,6 @@ pub fn sliceSegment(self: Self, abs_from: u64, abs_to: u64) !Segment {
     };
 }
 
-pub fn absIndexToReadable(self: Self, abs_idx: u64) !usize {
-    const max_abs_idx = self.total_write_count - 1;
-    const min_abs_idx = self.total_write_count - self.buffer_length;
-
-    if (abs_idx < min_abs_idx or abs_idx > max_abs_idx) {
-        return error.IndexOutOfBounds;
-    }
-
-    return abs_idx % self.buffer_length;
-}
-
 pub fn durationToSamples(sample_rate: usize, buffer_duration: f32) usize {
     const duration_f = (@intToFloat(f32, sample_rate) * buffer_duration);
     return @floatToInt(usize, @ceil(duration_f));

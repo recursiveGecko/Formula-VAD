@@ -12,7 +12,7 @@ const Self = @This();
 pub const Config = struct {
     n_channels: usize,
     fft_size: usize,
-    hop_size: usize = 0,
+    hop_size: usize,
     sample_rate: usize,
 };
 
@@ -96,15 +96,18 @@ pub fn fft(self: *Self, segment: Segment) !Result {
     );
     errdefer result.deinit();
 
+
     for (0..channels.len) |channel_idx| {
         const samples = channels[channel_idx];
         try self.fft_instance.fft(samples, self.window, result.channel_bins[channel_idx]);
     }
+    
+    result.index = segment.index;
 
     return result;
 }
 
-pub fn averageLoudnessInBand(self: Self, result: Result, min_freq: f32, max_freq: f32, channel_results: []f32) !void {
+pub fn averageVolumeInBand(self: Self, result: Result, min_freq: f32, max_freq: f32, channel_results: []f32) !void {
     assert(result.channel_bins.len == channel_results.len);
 
     const min_bin = try self.fft_instance.freqToBin(min_freq);

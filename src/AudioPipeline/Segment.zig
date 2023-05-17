@@ -1,12 +1,28 @@
+//! `Segment` is a container for multiple channels of audio data.
+//! 
+//! Each audio channel is represented by a `SplitSlice` of `f32` samples, which allows
+//! us to wrap non-contiguous audio samples (e.g. originating from a ring buffer) in 
+//! a single struct without creating a copy.
+//! 
+//! Each segment has an `index`, which corresponds to the index of the first sample
+//! in the segment. This index combined with the sample rate, can be used to calculate
+//! precise timestamps for the samples in the segment, relative to the beginning of the
+//! AudioPipeline. Every step in the pipeline is responsible for keeping this index
+//! accurate when slicing or combining segments.
+//! 
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const SplitSlice = @import("../structures/SplitSlice.zig").SplitSlice;
 
 const Self = @This();
 
+/// The index/sample number of the first sample in the segment relative to the start of the pipeline.
 index: u64,
+/// The number of samples in the segment.
 length: usize,
 allocator: ?Allocator,
+/// Per-channel audio data.
 channel_pcm_buf: []SplitSlice(f32),
 
 pub fn initWithCapacity(allocator: Allocator, n_channels: usize, length: usize) !Self {

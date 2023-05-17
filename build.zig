@@ -27,49 +27,45 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     };
 
-    var zbor_module = b.createModule(.{
-        .source_file = .{ .path = "lib/zbor/src/main.zig" },
-    });
-
-    var websocket_module = b.createModule(.{
-        .source_file = .{ .path = "lib/websocket/src/websocket.zig" },
-    });
+    //
+    // Main formula-vad exe
+    //
 
     const exe = b.addExecutable(.{
-        .name = "analyzer",
+        .name = "formula-vad",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
     });
-    exe.addModule("zbor", zbor_module);
-    exe.addModule("websocket", websocket_module);
     // try addZigGameDev(b, exe, common_options);
+    try addZbor(b, exe, common_options);
+    try addWebsocket(b, exe, common_options);
     try addSndfile(b, exe, common_options);
     try addKissFFT(b, exe, common_options);
     try addRnnoise(b, exe, common_options);
-
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
-
     run_cmd.step.dependOn(b.getInstallStep());
-
     if (b.args) |args| {
         run_cmd.addArgs(args);
     }
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    //
+    // formula-vad tests
+    //
+
     const unit_tests = b.addTest(.{
-        .name = "analyzer-test",
+        .name = "formula-vad-test",
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
     });
     // try addZigGameDev(b, unit_tests, common_options);
-    try addKissFFT(b, unit_tests, common_options);
     try addKissFFT(b, unit_tests, common_options);
     try addRnnoise(b, unit_tests, common_options);
 
@@ -78,6 +74,26 @@ pub fn build(b: *std.Build) !void {
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    //
+    // vad-evaluator executable
+    //
+    const evaluator_exe = b.addExecutable(.{
+        .name = "vad-evaluator",
+        .root_source_file = .{ .path = "src/cli/evaluator.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    try addClap(b, evaluator_exe, common_options);
+    b.installArtifact(evaluator_exe);
+
+    const evaluator_run_cmd = b.addRunArtifact(evaluator_exe);
+    evaluator_run_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+    const evaluator_run_step = b.step("evaluator", "Run the evaluator");
+    evaluator_run_step.dependOn(&evaluator_run_cmd.step);
 }
 
 fn addKissFFT(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
@@ -138,6 +154,30 @@ fn addSndfile(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOption
     _ = options;
     _ = b;
     exe.linkSystemLibrary("sndfile");
+}
+
+fn addZbor(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
+    _ = options;
+    var zbor_module = b.createModule(.{
+        .source_file = .{ .path = "lib/zbor/src/main.zig" },
+    });
+    exe.addModule("zbor", zbor_module);
+}
+
+fn addWebsocket(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
+    _ = options;
+    var websocket_module = b.createModule(.{
+        .source_file = .{ .path = "lib/websocket/src/websocket.zig" },
+    });
+    exe.addModule("websocket", websocket_module);
+}
+
+fn addClap(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
+    _ = options;
+    var clap_module = b.createModule(.{
+        .source_file = .{ .path = "lib/zig-clap/clap.zig" },
+    });
+    exe.addModule("clap", clap_module);
 }
 
 // fn addZigGameDev(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {

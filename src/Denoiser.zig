@@ -1,3 +1,11 @@
+//! Wrapper around the RNNoise library:
+//! 
+//! * Implements C-to-Zig bindings
+//! * Converts between normalized [-1, 1] float PCM samples and 
+//!   format expected by RNNoise (`s16` values represented as floats)
+//! * Accepts `SplitSlice(f32)` as input for better interop with 
+//!   the rest of the program
+//! 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const SplitSlice = @import("./structures/SplitSlice.zig").SplitSlice;
@@ -7,7 +15,6 @@ const rnnoise = @cImport({
 
 const Self = @This();
 
-// Denoiser struct fields
 allocator: std.mem.Allocator,
 denoise_state: ?*rnnoise.DenoiseState,
 
