@@ -13,29 +13,13 @@ pub const Config = struct {
     buffer_length: ?usize = null,
 };
 
-pub const Step = union(enum) {
-    vad: VAD,
-
-    pub fn run(self: *Step) !void {
-        switch (self.*) {
-            inline else => |*s| try s.run(),
-        }
-    }
-
-    pub fn deinit(self: *Step) void {
-        switch (self.*) {
-            inline else => |*s| s.deinit(),
-        }
-    }
-};
-
 allocator: Allocator,
 config: Config,
-steps: ?[]Step = null,
 raw_pcm_buf: ?[]f32 = null,
 channel_pcm_buf: ?[][]f32 = null,
 buffer_length: usize,
 total_write_count: u64 = 0,
+vad: ?VAD = null,
 
 pub fn init(allocator: Allocator, config: Config) !*Self {
     var self = try allocator.create(Self);
@@ -56,6 +40,9 @@ pub fn init(allocator: Allocator, config: Config) !*Self {
     self.raw_pcm_buf = try allocator.alloc(f32, config.n_channels * self.buffer_length);
     errdefer allocator.free(self.raw_pcm_buf.?);
 
+    self.vad = try VAD.init(self, .{});
+    errdefer self.vad.deinit();
+
     for (0..config.n_channels) |idx| {
         const from = idx * self.buffer_length;
         const to = from + self.buffer_length;
@@ -65,28 +52,13 @@ pub fn init(allocator: Allocator, config: Config) !*Self {
     self.allocator = allocator;
     self.config = config;
 
-    try self.initSteps();
     return self;
 }
 
-fn initSteps(self: *Self) !void {
-    var alloc = self.allocator;
-
-    var steps = try alloc.alloc(Step, 1);
-    errdefer alloc.free(steps);
-
-    var vad = try VAD.init(self, .{});
-    errdefer vad.deinit();
-    steps[0] = Step{ .vad = vad };
-
-    self.steps = steps;
-}
-
 pub fn deinit(self: *Self) void {
-    if (self.steps) |steps| {
-        for (steps) |*step| step.deinit();
-        self.allocator.free(steps);
-        self.steps = null;
+    if (self.vad) |*vad| {
+        vad.deinit();
+        self.vad = null;
     }
 
     if (self.channel_pcm_buf) |buf| {
@@ -141,9 +113,7 @@ pub fn pushSamples(self: *Self, channel_pcm: []const []const f32) !void {
 }
 
 pub fn runPipeline(self: *Self) !void {
-    for (self.steps.?) |*step| {
-        try step.run();
-    }
+    try self.vad.?.run();
 }
 
 /// Slice samples using absolute indices, from `abs_from` inclusive to `abs_to` exclusive.

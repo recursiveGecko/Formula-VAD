@@ -76,11 +76,11 @@ pub fn build(b: *std.Build) !void {
     test_step.dependOn(&run_unit_tests.step);
 
     //
-    // vad-evaluator executable
+    // vad-evaluator executable (evaluates given input against a reference file)
     //
     const evaluator_exe = b.addExecutable(.{
         .name = "vad-evaluator",
-        .root_source_file = .{ .path = "src/cli/evaluator.zig" },
+        .root_source_file = .{ .path = "src/Evaluator.zig" },
         .target = target,
         .optimize = optimize,
     });
@@ -90,10 +90,33 @@ pub fn build(b: *std.Build) !void {
     const evaluator_run_cmd = b.addRunArtifact(evaluator_exe);
     evaluator_run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
-        run_cmd.addArgs(args);
+        evaluator_run_cmd.addArgs(args);
     }
-    const evaluator_run_step = b.step("evaluator", "Run the evaluator");
+    const evaluator_run_step = b.step("evaluator", "Run the evaluator (VAD output + reference output)");
     evaluator_run_step.dependOn(&evaluator_run_cmd.step);
+
+    //
+    // vad-simulator executable  - Runs VAD against given audio file and evaluates the results against a reference file
+    //
+    const simulator_exe = b.addExecutable(.{
+        .name = "simulator",
+        .root_source_file = .{ .path = "src/simulator.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    try addClap(b, simulator_exe, common_options);
+    try addSndfile(b, simulator_exe, common_options);
+    try addKissFFT(b, simulator_exe, common_options);
+    try addRnnoise(b, simulator_exe, common_options);
+    b.installArtifact(simulator_exe);
+
+    const simulator_run_cmd = b.addRunArtifact(simulator_exe);
+    simulator_run_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        simulator_run_cmd.addArgs(args);
+    }
+    const simulator_run_step = b.step("simulator", "Run the simulator (audio file + reference output)");
+    simulator_run_step.dependOn(&simulator_run_cmd.step);
 }
 
 fn addKissFFT(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {

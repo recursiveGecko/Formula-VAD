@@ -11,19 +11,7 @@ pub fn main() !void {
 }
 
 pub fn audioTest(allocator: Allocator) !void {
-    const AudioBuffer = @import("./audio_utils/AudioBuffer.zig");
-    // const audio = try AudioBuffer.loadFromFile(allocator, "tmp/dtfm.ogg");
-    const audio = try AudioBuffer.loadFromFile(allocator, "tmp/increasing.ogg");
-    std.debug.print("Loaded audio file\n", .{});
-
-    const batch_vad = @import("./cli/batch-vad.zig");
-    try batch_vad.runVADSingle(allocator, audio);
-
-    // const repeats = (60) / (audio.length / audio.sample_rate);
-    // std.debug.print("Repeating: {d} times, total samples: {d}\n", .{repeats, repeats * audio.length});
-    // for (1..repeats) |_| {
-    //     try batch_vad.runVADSingle(allocator, audio);
-    // }
+    _ = allocator;
 
     // const Spectrogram = @import("./audio_utils/Spectrogram.zig");
     // const spectrogram = try Spectrogram.compute(allocator, audio.channel_pcm_buf[0], .{

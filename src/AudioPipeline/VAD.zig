@@ -366,7 +366,7 @@ fn handleSpeechEvent(self: *Self) !void {
     const length_realtime = @intToFloat(f32, length_samples) / sample_rate_f;
     const speech_duration_met = length_realtime * 1000 >= config.min_vad_duration_ms;
 
-    std.debug.print("Speech duration: {d: >6.2}", .{length_realtime});
+    // std.debug.print("Speech duration: {d: >6.2}", .{length_realtime});
 
     if (speech_duration_met) {
         const segment = VADSegment{
@@ -375,9 +375,9 @@ fn handleSpeechEvent(self: *Self) !void {
         };
         _ = try self.vad_segments.append(segment);
 
-        std.debug.print(" (ok)\n", .{});
+        // std.debug.print(" (ok)\n", .{});
     } else {
         // Discard, VAD too short
-        std.debug.print(" (too short)\n", .{});
+        // std.debug.print(" (too short)\n", .{});
     }
 }
