@@ -71,6 +71,7 @@ fn printHelp() !void {
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var allocator = gpa.allocator();
+    const stdout_w = stdout.writer();
 
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, clap.parsers.default, .{
@@ -113,7 +114,7 @@ pub fn main() !void {
     const ref_segments = try Evaluator.parseAudacityTxt(allocator, ref_contents);
     defer allocator.free(ref_segments);
 
-    try stdout.writer().print("Loaded {} samples from audio file. Running...\n", .{audio_buffer.length});
+    try stdout_w.print("Loaded {} samples from audio file. Running...\n", .{audio_buffer.length});
 
     // Run VAD and evaluate results
     const simulated_segments = try runVADSingle(allocator, audio_buffer);
@@ -123,15 +124,21 @@ pub fn main() !void {
     defer evaluator.deinit();
 
     const stats = evaluator.buildStatistics();
-    std.debug.print("{any}", .{stats});
+
+    try stdout_w.print("Statistics:\n", .{});
+    try stdout_w.print("Real events:     {}\n", .{stats.total_reference_events});
+    try stdout_w.print("VAD events:      {}\n", .{stats.total_input_events});
+    try stdout_w.print("True positives:  {}\n", .{stats.true_positives});
+    try stdout_w.print("False positives: {}\n", .{stats.false_positives});
+    try stdout_w.print("False negatives: {}\n", .{stats.false_negatives});
 
     // Maybe write output segments
-    if (out_file) |out| {
-        var ow = out.writer();
-        defer out.close();
+    if (out_file) |out_f| {
+        var out_fw = out_f.writer();
+        defer out_fw.close();
 
         for (evaluator.input_segments) |segment| {
-            try ow.print("{d:.4}\t{d:.4}\t{s}\n", .{ segment.from_sec, segment.to_sec, @tagName(segment.match) });
+            try out_fw.print("{d:.4}\t{d:.4}\t{s}\n", .{ segment.from_sec, segment.to_sec, @tagName(segment.match) });
         }
     }
 }

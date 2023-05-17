@@ -149,6 +149,7 @@ fn printHelp() !void {
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var allocator = gpa.allocator();
+    var stdout_w = stdout.writer();
 
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, clap.parsers.default, .{
@@ -191,7 +192,12 @@ pub fn main() !void {
     defer evaluator.deinit();
 
     const stats = evaluator.buildStatistics();
-    std.debug.print("{any}", .{stats});
+    try stdout_w.print("Statistics:\n", .{});
+    try stdout_w.print("Real events:     {}\n", .{stats.total_reference_events});
+    try stdout_w.print("VAD events:      {}\n", .{stats.total_input_events});
+    try stdout_w.print("True positives:  {}\n", .{stats.true_positives});
+    try stdout_w.print("False positives: {}\n", .{stats.false_positives});
+    try stdout_w.print("False negatives: {}\n", .{stats.false_negatives});
 }
 
 pub fn parseAudacityTxt(allocator: Allocator, txt: []const u8) ![]SpeechSegment {
