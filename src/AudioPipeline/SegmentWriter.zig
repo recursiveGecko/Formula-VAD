@@ -34,7 +34,7 @@ pub fn deinit(self: *Self) void {
 /// the buffer is full and the buffer segment should be used in some way before
 /// calling .reset(), followed by a second .write() with the offset returned from this call.
 pub fn write(self: *Self, other: Segment, offset: usize) !usize {
-    const segment = self.segment;
+    var segment = self.segment;
 
     // Determine the capacity of the internal buffer
     const capacity = segment.length;
@@ -114,8 +114,8 @@ test "SegmentWriter" {
     const sample_pattern: []const f32 = &.{ 1, 2, 3, 4 };
     var segment_channels: []const SplitSlice(f32) = &.{
         SplitSlice(f32){
-            .first = sample_pattern[0..1],
-            .second = sample_pattern[1..],
+            .first = @constCast(sample_pattern[0..1]),
+            .second = @constCast(sample_pattern[1..]),
         },
     };
     const segment = Segment{

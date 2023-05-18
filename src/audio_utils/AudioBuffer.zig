@@ -10,7 +10,7 @@ sample_rate: usize,
 channel_pcm_buf: [][]f32,
 length: usize,
 
-pub fn loadFromFile(allocator: Allocator, path: [:0]const u8) !Self {
+pub fn loadFromFile(allocator: Allocator, path: []const u8) !Self {
     var stream = try AudioFileStream.open(allocator, path);
     defer stream.close();
 
@@ -29,7 +29,7 @@ pub fn loadFromFile(allocator: Allocator, path: [:0]const u8) !Self {
     const read_chunk_size = stream.sample_rate * 10;
     var offset: usize = 0;
     while (true) {
-        const samples_read = try stream.read(channel_pcm_buf, read_chunk_size, offset);
+        const samples_read = try stream.read(channel_pcm_buf, offset, read_chunk_size);
         if (samples_read < read_chunk_size) break;
         offset += samples_read;
     }

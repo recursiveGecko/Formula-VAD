@@ -31,6 +31,7 @@ pub const VADSegment = struct {
     sample_from: usize,
     sample_to: usize,
     debug_rnn_vad: f32,
+    debug_avg_speech_vol_ratio: f32,
 };
 
 const DenoiserResult = struct {
@@ -68,8 +69,6 @@ denoiser_result_queue: FixedCapacityDeque(DenoiserResult),
 denoiser_fft_buffer: SegmentWriter,
 /// Stores RNNoise VAD for segments that are being buffered for FFT
 fft_buffer_rnn_vad: f32 = 0,
-// Holds Segments that are ready to be processed by FFT
-fft_input_queue: FixedCapacityDeque(DenoiserResult),
 /// FFT wrapper for the pipeline that holds the FFT state,
 /// our chosen window function, and that can process multiple
 /// channels of audio data at once (operating on Segments)
@@ -78,12 +77,16 @@ pipeline_fft: PipelineFFT,
 speech_state: SpeechState = .closed,
 long_term_speech_volume: RollingAverage,
 short_term_speech_volume: RollingAverage,
+audio_vol_ratio: RollingAverage,
 // Start and stop samples of the ongoing speech segment
 speech_start_index: u64 = 0,
 speech_end_index: u64 = 0,
 // RNNoise VAD for ongoing speech segments
 speech_rnn_vad: f32 = 0,
 speech_rnn_vad_count: usize = 0,
+// Volume ratio between channels for ongoing speech segments
+speech_vol_ratio: f32 = 0,
+speech_vol_ratio_count: usize = 0,
 
 /// End result - VAD segments
 vad_segments: std.ArrayList(VADSegment),
@@ -110,10 +113,6 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     // Pipeline sample number that corresponds to the start of the FFT buffer
     denoiser_fft_buffer.segment.index = 0;
     errdefer denoiser_fft_buffer.deinit();
-
-    // TODO: Find optimal length?
-    var fft_input_queue = try FixedCapacityDeque(DenoiserResult).init(allocator, 100);
-    errdefer fft_input_queue.deinit();
 
     var pipeline_fft = try PipelineFFT.init(allocator, .{
         .n_channels = n_channels,
@@ -147,6 +146,13 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     );
     errdefer short_term_speech_avg.deinit();
 
+    var audio_vol_ratio = try RollingAverage.init(
+        allocator,
+        5,
+        null,
+    );
+    errdefer audio_vol_ratio.deinit();
+
     var vad_segments = try std.ArrayList(VADSegment).initCapacity(allocator, 100);
     errdefer vad_segments.deinit();
 
@@ -158,10 +164,10 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
         .denoiser = denoiser,
         .denoiser_result_queue = denoiser_res_queue,
         .denoiser_fft_buffer = denoiser_fft_buffer,
-        .fft_input_queue = fft_input_queue,
         .pipeline_fft = pipeline_fft,
         .long_term_speech_volume = long_term_speech_avg,
         .short_term_speech_volume = short_term_speech_avg,
+        .audio_vol_ratio = audio_vol_ratio,
         .vad_segments = vad_segments,
     };
 
@@ -173,15 +179,10 @@ pub fn deinit(self: *Self) void {
         var r = self.denoiser_result_queue.popFront() catch unreachable;
         r.deinit();
     }
-    while (self.fft_input_queue.length() > 0) {
-        var r = self.fft_input_queue.popFront() catch unreachable;
-        r.deinit();
-    }
     self.denoiser.deinit();
     self.denoiser_result_queue.deinit();
     self.denoiser_fft_buffer.deinit();
     self.pipeline_fft.deinit();
-    self.fft_input_queue.deinit();
 
     self.long_term_speech_volume.deinit();
     self.short_term_speech_volume.deinit();
@@ -189,17 +190,29 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn run(self: *Self) !void {
-    try self.denoiserStep();
-    try self.denoiserFftBufferStep();
-    try self.fftStep();
+    var keep_running: bool = true;
+
+    // Keep running as long as there is data to process
+    while (keep_running) {
+        const s1 = try self.denoiserStep();
+        const s2 = try self.denoiserFftBufferStep();
+
+        keep_running = s1 or s2;
+    }
 }
 
-fn denoiserStep(self: *Self) !void {
+/// Returns true if any processing was done
+fn denoiserStep(self: *Self) !bool {
     const frame_size = Denoiser.getFrameSize();
     const p = self.pipeline;
 
+    var did_process: bool = false;
+
     // While there are enough input samples to form a RNNoise frame
     while (p.total_write_count - self.denoiser_read_count >= frame_size) {
+        did_process = true;
+        if (self.denoiser_result_queue.remainingCapacity() == 0) break;
+
         const from = self.denoiser_read_count;
         const to = from + frame_size;
 
@@ -231,13 +244,19 @@ fn denoiserStep(self: *Self) !void {
         try self.denoiser_result_queue.pushBack(denoise_result);
         self.denoiser_read_count = to;
     }
+
+    return did_process;
 }
 
-fn denoiserFftBufferStep(self: *Self) !void {
+fn denoiserFftBufferStep(self: *Self) !bool {
     var fft_buffer = &self.denoiser_fft_buffer;
     const fft_buffer_len = fft_buffer.segment.length;
 
+    var did_process: bool = false;
+
     while (self.denoiser_result_queue.length() > 0) {
+        did_process = true;
+
         var denoiser_result: DenoiserResult = try self.denoiser_result_queue.popFront();
         defer denoiser_result.deinit();
 
@@ -270,12 +289,11 @@ fn denoiserFftBufferStep(self: *Self) !void {
                 };
                 self.fft_buffer_rnn_vad = 0;
 
-                // TODO: We could avoid this queue and just run the FFT directly
-                try self.fft_input_queue.pushBack(fft_input);
-                
                 // Global index of the first sample in the next segment
                 const next_fft_buffer_index = denoised_segment.index + denoised_buf_offset;
                 fft_buffer.reset(next_fft_buffer_index);
+
+                try self.fftStep(&fft_input);
             }
 
             // We have written the entirety of the source segment
@@ -284,18 +302,17 @@ fn denoiserFftBufferStep(self: *Self) !void {
             }
         }
     }
+
+    return did_process;
 }
 
-fn fftStep(self: *Self) !void {
-    while (self.fft_input_queue.length() > 0) {
-        var fft_input: DenoiserResult = try self.fft_input_queue.popFront();
-        defer fft_input.deinit();
+fn fftStep(self: *Self, fft_input: *DenoiserResult) !void {
+    defer fft_input.deinit();
 
-        var result: PipelineFFT.Result = try self.pipeline_fft.fft(fft_input.segment);
-        defer result.deinit();
+    var result: PipelineFFT.Result = try self.pipeline_fft.fft(fft_input.segment);
+    defer result.deinit();
 
-        try self.speechStep(result, fft_input.vad);
-    }
+    try self.speechStep(result, fft_input.vad);
 }
 
 fn speechStep(self: *Self, result: PipelineFFT.Result, rnn_vad: f32) !void {
@@ -314,6 +331,7 @@ fn speechStep(self: *Self, result: PipelineFFT.Result, rnn_vad: f32) !void {
         if (volume < min_volume) min_volume = volume;
         if (volume > max_volume) max_volume = volume;
     }
+    const speech_ratio = min_volume / max_volume;
 
     // Number of consecutive samples above the threshold before the VAD opens
     const min_consecutive_to_open = @floatToInt(usize, sample_rate_f * config.min_consecutive_ms_to_open / 1000);
@@ -342,7 +360,7 @@ fn speechStep(self: *Self, result: PipelineFFT.Result, rnn_vad: f32) !void {
                 self.speech_start_index = result.index;
             }
 
-            self.trackRnnSpeechVad(rnn_vad, .closed, self.speech_state);
+            self.trackSpeechStats(rnn_vad, speech_ratio, .closed, self.speech_state);
         },
         .opening => {
             const samples_since_opening = result.index - self.speech_start_index;
@@ -355,7 +373,7 @@ fn speechStep(self: *Self, result: PipelineFFT.Result, rnn_vad: f32) !void {
                 self.speech_state = .closed;
             }
 
-            self.trackRnnSpeechVad(rnn_vad, .opening, self.speech_state);
+            self.trackSpeechStats(rnn_vad, speech_ratio, .opening, self.speech_state);
         },
         .open => {
             if (!threshold_met) {
@@ -363,7 +381,7 @@ fn speechStep(self: *Self, result: PipelineFFT.Result, rnn_vad: f32) !void {
                 self.speech_end_index = result.index + config.fft_size;
             }
 
-            self.trackRnnSpeechVad(rnn_vad, .open, self.speech_state);
+            self.trackSpeechStats(rnn_vad, speech_ratio, .open, self.speech_state);
         },
         .closing => {
             const samples_since_closing = result.index - self.speech_end_index;
@@ -376,7 +394,7 @@ fn speechStep(self: *Self, result: PipelineFFT.Result, rnn_vad: f32) !void {
                 try self.onSpeechEnd();
             }
 
-            self.trackRnnSpeechVad(rnn_vad, .closing, self.speech_state);
+            self.trackSpeechStats(rnn_vad, speech_ratio, .closing, self.speech_state);
         },
     }
 
@@ -391,13 +409,17 @@ fn speechStep(self: *Self, result: PipelineFFT.Result, rnn_vad: f32) !void {
 }
 
 /// Track RNNoise's own VAD score during speech segments
-fn trackRnnSpeechVad(self: *Self, rnn_vad: f32, from_state: SpeechState, to_state: SpeechState) void {
+fn trackSpeechStats(self: *Self, rnn_vad: f32, speech_ratio: f32, from_state: SpeechState, to_state: SpeechState) void {
     if (from_state == .closed and to_state == .opening) {
         self.speech_rnn_vad = rnn_vad;
         self.speech_rnn_vad_count = 1;
+        self.speech_vol_ratio = speech_ratio;
+        self.speech_vol_ratio_count = 1;
     } else if (from_state == .opening or from_state == .open) {
         self.speech_rnn_vad += rnn_vad;
         self.speech_rnn_vad_count += 1;
+        self.speech_vol_ratio += speech_ratio;
+        self.speech_vol_ratio_count += 1;
     }
 }
 
@@ -418,20 +440,22 @@ fn onSpeechEnd(self: *Self) !void {
     const speech_duration_met = length_realtime * 1000 >= config.min_vad_duration_ms;
 
     const avg_rnn_vad = self.speech_rnn_vad / @intToFloat(f32, self.speech_rnn_vad_count);
+    const avg_speech_vol_ratio = self.speech_vol_ratio / @intToFloat(f32, self.speech_vol_ratio_count);
 
     if (speech_duration_met) {
         const segment = VADSegment{
             .sample_from = sample_from,
             .sample_to = sample_to,
             .debug_rnn_vad = avg_rnn_vad,
+            .debug_avg_speech_vol_ratio = avg_speech_vol_ratio,
         };
         _ = try self.vad_segments.append(segment);
 
         const debug_len_s = @intToFloat(f32, length_samples) / sample_rate_f;
 
         log.info(
-            "VAD Segment: {d: >6.2}s  | Avg. RNNoise VAD: {d: >6.2}%",
-            .{ debug_len_s, avg_rnn_vad * 100 },
+            "VAD Segment: {d: >6.2}s  | Avg. RNNoise VAD: {d: >6.2}% | Avg. vol ratio: {d: >5.2} ",
+            .{ debug_len_s, avg_rnn_vad * 100, avg_speech_vol_ratio },
         );
     }
 

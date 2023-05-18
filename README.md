@@ -15,7 +15,7 @@ git clone --recursive https://github.com/recursiveGecko/formula-vad
 
 # Dependencies
 
-* Zig: `0.11.0 master`. Tested with `0.11.0-dev.3132+465272921`.
+* Zig: `0.11.0 master`. Tested with `0.11.0-dev.3198+ad20236e9`.
 
 * libsndfile:
 

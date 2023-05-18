@@ -34,7 +34,7 @@ pub fn init(allocator: Allocator, config: Config) !*Self {
     });
 
     // TODO: Calculate a more optional length?
-    self.buffer_length = config.buffer_length orelse config.sample_rate * 30;
+    self.buffer_length = config.buffer_length orelse config.sample_rate * 10;
 
     self.channel_pcm_buf = try allocator.alloc([]f32, config.n_channels);
     errdefer allocator.free(self.channel_pcm_buf.?);
@@ -84,38 +84,71 @@ pub fn pushSamples(self: *Self, channel_pcm: []const []const f32) !void {
     // Assert that we have the same number of channels as configured
     assert(channel_pcm.len == self.config.n_channels);
 
-    const n_input_samples = channel_pcm[0].len;
-    const sample_write_idx = self.total_write_count % self.buffer_length;
+    const n_total_input_samples = channel_pcm[0].len;
 
     for (0..self.config.n_channels) |channel_idx| {
         // Assert that all input channels have the same number of samples
-        assert(channel_pcm[channel_idx].len == n_input_samples);
-
-        // Step 1: Write up to the end of the buffer
-        const rem_to_end = self.buffer_length - sample_write_idx;
-        const to_end = @min(n_input_samples, rem_to_end);
-
-        var src_channel = channel_pcm[channel_idx][0..to_end];
-        var dst_channel = self.channel_pcm_buf.?[channel_idx][sample_write_idx..];
-        // TODO: Zig 0.11.x doesn't support copying shorter slices into longer ones
-        dst_channel = dst_channel[0..src_channel.len];
-        @memcpy(dst_channel, src_channel);
-
-        // Step 2: Write any remaining samples to the start of the buffer
-        const from_start = @max(0, n_input_samples - to_end);
-
-        if (from_start > 0) {
-            src_channel = channel_pcm[channel_idx][to_end..];
-            dst_channel = self.channel_pcm_buf.?[channel_idx][0..];
-            // TODO: Zig 0.11.x doesn't support copying shorter slices into longer ones
-            dst_channel = dst_channel[0..src_channel.len];
-            @memcpy(dst_channel, src_channel);
-        }
+        assert(channel_pcm[channel_idx].len == n_total_input_samples);
     }
 
-    self.total_write_count += n_input_samples;
+    // We could add a smarter strategy, by observing `.processedCount()`
+    // to know how far we can write, but this is good enough
+    const write_chunk_size = self.buffer_length / 2;
+    var src_read_offset: usize = 0;
 
-    try self.runPipeline();
+    // Write in chunks of `write_chunk_size` samples to ensure we don't
+    // write too much data before processing it
+    while (true) {
+        const dst_write_index = self.total_write_count % self.buffer_length;
+        // Number of samples remaining until we reach the end of the ring buffer
+        // and need to start writing from the start again
+        const dst_distance_to_end = self.buffer_length - dst_write_index;
+        // Number of samples remaining in the input/source buffer
+        const src_remaining = n_total_input_samples - src_read_offset;
+
+        // Number of samples to write **in this iteration**
+        const n_samples_to_write = @min(src_remaining, write_chunk_size);
+
+        // Step 1. Range of samples to write until the end of the ring buffer
+        const to_end__src_from = src_read_offset;
+        const to_end__src_to = to_end__src_from + @min(dst_distance_to_end, n_samples_to_write);
+
+        const to_end__dst_from = dst_write_index;
+        const to_end__dst_to = to_end__dst_from + @min(dst_distance_to_end, n_samples_to_write);
+
+        const to_end__count = to_end__dst_to - to_end__dst_from;
+
+        // Step 2. Range of samples to write from the start of the ring buffer, usually 0
+        const from_start__count = n_samples_to_write - to_end__count;
+
+        const from_start__src_from = src_read_offset + to_end__count;
+        const from_start__src_to = from_start__src_from + from_start__count;
+
+        const from_start__dst_from = 0;
+        const from_start__dst_to = from_start__count;
+
+        for (0..self.config.n_channels) |channel_idx| {
+            var src_channel = channel_pcm[channel_idx];
+            var dst_channel = self.channel_pcm_buf.?[channel_idx];
+
+            var src_read_slice = src_channel[to_end__src_from..to_end__src_to];
+            var dst_write_slice = dst_channel[to_end__dst_from..to_end__dst_to];
+            @memcpy(dst_write_slice, src_read_slice);
+
+            if (from_start__count > 0) {
+                src_read_slice = src_channel[from_start__src_from..from_start__src_to];
+                dst_write_slice = dst_channel[from_start__dst_from..from_start__dst_to];
+                @memcpy(dst_write_slice, src_read_slice);
+            }
+        }
+
+        self.total_write_count += n_samples_to_write;
+        src_read_offset += n_samples_to_write;
+
+        try self.runPipeline();
+
+        if (src_read_offset == n_total_input_samples) break;
+    }
 }
 
 pub fn runPipeline(self: *Self) !void {

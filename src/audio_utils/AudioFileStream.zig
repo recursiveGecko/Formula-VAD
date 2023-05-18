@@ -14,7 +14,7 @@ n_channels: usize,
 sample_rate: usize,
 length: usize,
 
-pub fn open(allocator: Allocator, path: [:0]const u8) !Self {
+pub fn open(allocator: Allocator, path: []const u8) !Self {
     var self = Self{
         .allocator = allocator,
         .sf_info = std.mem.zeroInit(sndfile.SF_INFO, .{}),
@@ -25,7 +25,10 @@ pub fn open(allocator: Allocator, path: [:0]const u8) !Self {
     };
     errdefer self.close();
 
-    self.sf_file = sndfile.sf_open(path.ptr, sndfile.SFM_READ, &self.sf_info);
+    const path_Z = try allocator.dupeZ(u8, path);
+    defer allocator.free(path_Z);
+
+    self.sf_file = sndfile.sf_open(path_Z.ptr, sndfile.SFM_READ, &self.sf_info);
 
     if (self.sf_file == null) {
         return error.SndfileOpenError;
@@ -44,7 +47,7 @@ pub fn open(allocator: Allocator, path: [:0]const u8) !Self {
 /// Returns an error if the destination is full, callers should close the stream
 /// when the number of samples read is less than the number of samples expected.
 ///
-pub fn read(self: *Self, result_pcm: [][]f32, max_samples: usize, offset: usize) !usize {
+pub fn read(self: *Self, result_pcm: [][]f32, offset: usize, max_samples: usize) !usize {
     if (self.sf_file == null) {
         return error.FileNotOpen;
     }
@@ -80,6 +83,21 @@ pub fn read(self: *Self, result_pcm: [][]f32, max_samples: usize, offset: usize)
     return samples_read / self.n_channels;
 }
 
+pub fn seekToSample(self: *Self, sample: usize) !void {
+    if (self.sf_file == null) {
+        return error.FileNotOpen;
+    }
+
+    const sf_file = self.sf_file.?;
+
+    const c_sample_index = @intCast(i64, sample);
+    const c_seek_result = sndfile.sf_seek(sf_file, c_sample_index, sndfile.SEEK_SET);
+
+    if (c_seek_result == -1) {
+        return error.SeekFailed;
+    }
+}
+
 pub fn close(self: *Self) void {
     if (self.sf_file) |sf_file| {
         _ = sndfile.sf_close(sf_file);
@@ -87,6 +105,6 @@ pub fn close(self: *Self) void {
     }
 }
 
-pub fn lengthSeconds(self: Self) f32 {
+pub fn durationSeconds(self: Self) f32 {
     return @intToFloat(f32, self.length) / @intToFloat(f32, self.sample_rate);
 }

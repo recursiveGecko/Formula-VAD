@@ -10,8 +10,8 @@ pub fn SplitSlice(comptime T: type) type {
         const Self = @This();
 
         id: u64 = 0,
-        first: []const T,
-        second: []const T = &.{},
+        first: []T,
+        second: []T = &.{},
         allocator: ?Allocator = null,
         /// Which slices to free when deinit is called.
         owned_slices: enum { none, first, second, both } = .none,

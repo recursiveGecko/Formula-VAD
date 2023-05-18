@@ -7,6 +7,8 @@ const clap = @import("clap");
 const exit = std.os.exit;
 var stderr = std.io.getStdErr();
 var stdout = std.io.getStdOut();
+const megabyte = 1024 * 1024;
+
 
 pub const SpeechSegment = struct {
     const Match = enum {
@@ -182,8 +184,6 @@ pub fn main() !void {
         exit(1);
     }
 
-    const megabyte = 1024 * 1024;
-
     const input_contents = try fs.Dir.readFileAlloc(fs.cwd(), allocator, input_file_path.?, 10 * megabyte);
     defer allocator.free(input_contents);
 
@@ -206,6 +206,16 @@ pub fn main() !void {
     try stdout_w.print("True positives:  {}\n", .{stats.true_positives});
     try stdout_w.print("False positives: {}\n", .{stats.false_positives});
     try stdout_w.print("False negatives: {}\n", .{stats.false_negatives});
+}
+
+pub fn readParseReferenceFile(allocator: Allocator, path: []const u8) ![]SpeechSegment {
+    const ref_contents = try fs.Dir.readFileAlloc(fs.cwd(), allocator, path, 10 * megabyte);
+    defer allocator.free(ref_contents);
+
+    const ref_segments = try parseAudacityTxt(allocator, ref_contents);
+    errdefer allocator.free(ref_segments);
+
+    return ref_segments;
 }
 
 pub fn parseAudacityTxt(allocator: Allocator, txt: []const u8) ![]SpeechSegment {
