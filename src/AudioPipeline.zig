@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.pipeline);
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const PipelineFFT = @import("./AudioPipeline/PipelineFFT.zig");
@@ -11,6 +12,7 @@ pub const Config = struct {
     sample_rate: usize,
     n_channels: usize,
     buffer_length: ?usize = null,
+    vad_config: VAD.Config = .{},
 };
 
 allocator: Allocator,
@@ -40,7 +42,7 @@ pub fn init(allocator: Allocator, config: Config) !*Self {
     self.raw_pcm_buf = try allocator.alloc(f32, config.n_channels * self.buffer_length);
     errdefer allocator.free(self.raw_pcm_buf.?);
 
-    self.vad = try VAD.init(self, .{});
+    self.vad = try VAD.init(self, config.vad_config);
     errdefer self.vad.deinit();
 
     for (0..config.n_channels) |idx| {
@@ -72,6 +74,10 @@ pub fn deinit(self: *Self) void {
     }
 
     self.allocator.destroy(self);
+}
+
+pub fn processedCount(self: Self) usize {
+    return self.vad.?.fully_processed_count;
 }
 
 pub fn pushSamples(self: *Self, channel_pcm: []const []const f32) !void {
@@ -167,6 +173,17 @@ pub fn sliceSegment(self: Self, abs_from: u64, abs_to: u64) !Segment {
         .allocator = self.allocator,
         .channel_pcm_buf = channels,
     };
+}
+
+pub fn beginCapture(self: *Self, from_sample: usize) !void {
+    _ = from_sample;
+    _ = self;
+}
+
+pub fn endCapture(self: *Self, to_sample: usize, keep: bool) !void {
+    _ = keep;
+    _ = to_sample;
+    _ = self;
 }
 
 pub fn durationToSamples(sample_rate: usize, buffer_duration: f32) usize {

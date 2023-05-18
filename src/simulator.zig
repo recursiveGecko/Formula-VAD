@@ -7,19 +7,34 @@ const clap = @import("clap");
 const Evaluator = @import("Evaluator.zig");
 
 const fs = std.fs;
+const log = std.log.scoped(.simulator);
 const exit = std.os.exit;
-var stderr = std.io.getStdErr();
-var stdout = std.io.getStdOut();
+const stderr = std.io.getStdErr();
+const stdout = std.io.getStdOut();
+const stderr_w = stdout.writer();
+const stdout_w = stdout.writer();
+
+/// stdlib option overrides
+pub const std_options = struct {
+    pub const log_level = .info;
+    pub const log_scope_levels = &.{
+        .{
+            .scope = .vad,
+            .level = .info,
+        },
+    };
+};
 
 pub fn runVADSingle(allocator: Allocator, stream: *AudioFileStream) ![]Evaluator.SpeechSegment {
     const pipeline = try AudioPipeline.init(allocator, .{
         .sample_rate = stream.sample_rate,
         .n_channels = stream.n_channels,
+        .vad_config = .{},
     });
     defer pipeline.deinit();
 
     const sample_rate = stream.sample_rate;
-    const frame_size = sample_rate * 1;
+    const frame_size = sample_rate / 10;
 
     // The backing slice of slices for our audio samples
     var backing_channel_pcm = try allocator.alloc([]f32, stream.n_channels);
@@ -51,7 +66,7 @@ pub fn runVADSingle(allocator: Allocator, stream: *AudioFileStream) ![]Evaluator
         total_samples_read += samples_read;
     }
 
-    std.debug.print("Processed: {d} samples\n", .{total_samples_read});
+    log.info("Processed: {d} samples", .{total_samples_read});
 
     const vad_segments = try pipeline.vad.?.vad_segments.toOwnedSlice();
     defer allocator.free(vad_segments);
@@ -84,14 +99,13 @@ const params = clap.parseParamsComptime(
 );
 
 fn printHelp() !void {
-    try clap.help(stdout.writer(), clap.Help, &params, .{});
+    try clap.help(stdout_w, clap.Help, &params, .{});
 }
 
 /// Entrypoint for CLI invocation
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var allocator = gpa.allocator();
-    const stdout_w = stdout.writer();
 
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, clap.parsers.default, .{
@@ -133,7 +147,7 @@ pub fn main() !void {
     const ref_segments = try Evaluator.parseAudacityTxt(allocator, ref_contents);
     defer allocator.free(ref_segments);
 
-    try stdout_w.print("Streaming {d:.2}s from audio file. Running...\n", .{audio_stream.lengthSeconds()});
+    log.info("Streaming {d:.2}s from audio file. Running...", .{audio_stream.lengthSeconds()});
 
     // Run VAD and evaluate results
     const simulated_segments = try runVADSingle(allocator, &audio_stream);

@@ -38,7 +38,11 @@ pub fn open(allocator: Allocator, path: [:0]const u8) !Self {
     return self;
 }
 
-/// Reads a given maximum number
+/// Reads a given maximum number of samples from the file and writes them into
+/// the given destination buffer, starting at the given offset.
+/// Returns the number of samples read.
+/// Returns an error if the destination is full, callers should close the stream
+/// when the number of samples read is less than the number of samples expected.
 ///
 pub fn read(self: *Self, result_pcm: [][]f32, max_samples: usize, offset: usize) !usize {
     if (self.sf_file == null) {
