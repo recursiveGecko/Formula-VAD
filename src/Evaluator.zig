@@ -24,6 +24,7 @@ pub const SpeechSegment = struct {
     start_delta: ?f32 = null,
     // TODO: Not implemented
     end_delta: ?f32 = null,
+    debug_info: ?[]const u8 = null,
 
     pub fn duration(self: SpeechSegment) f32 {
         return self.to_sec - self.from_sec;
@@ -34,6 +35,13 @@ pub const SpeechSegment = struct {
         const min_to = @min(self.to_sec, other.to_sec);
 
         return min_to - max_from;
+    }
+
+    pub fn toComment(self: SpeechSegment, allocator: Allocator) ![]const u8 {
+        var prefix = @tagName(self.match);
+        if (self.match == .matched) prefix = "";
+
+        return try std.fmt.allocPrint(allocator, "{s} {s}", .{prefix, self.debug_info orelse ""});
     }
 };
 
@@ -109,7 +117,7 @@ fn findOverlapping(self: *Self, target: SpeechSegment, others: []SpeechSegment) 
 }
 
 // TODO: This is pretty shaky since it doesn't take overlap into account
-// and the fact that one VAD segment could correspond to multiple reference 
+// and the fact that one VAD segment could correspond to multiple reference
 // segments and vice versa.
 // Contributions welcome.
 pub fn buildStatistics(self: *Self) Stats {

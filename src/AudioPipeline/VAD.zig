@@ -20,7 +20,7 @@ pub const Config = struct {
     short_term_average_sec: f32 = 0.2,
     speech_min_freq: f32 = 100,
     speech_max_freq: f32 = 1500,
-    speech_threshold_factor: f32 = 10,
+    speech_threshold_factor: f32 = 22,
     min_consecutive_ms_to_open: f32 = 200,
     max_speech_gap_ms: f32 = 1000,
     min_vad_duration_ms: f32 = 700,
@@ -29,6 +29,7 @@ pub const Config = struct {
 pub const VADSegment = struct {
     sample_from: usize,
     sample_to: usize,
+    debug_rnn_vad: f32,
 };
 
 const DenoiserResult = struct {
@@ -55,8 +56,10 @@ denoiser_result_queue: FixedCapacityDeque(DenoiserResult),
 /// Buffer between denoiser and FFT, forming segments that are
 /// `fft_size` samples long
 denoiser_fft_buffer: SegmentWriter,
+/// Stores RNNoise VAD for segments that are being combined
+fft_buffer_rnn_vad: f32 = 0,
 // Holds Segments that are ready to be processed by FFT
-fft_input_queue: FixedCapacityDeque(Segment),
+fft_input_queue: FixedCapacityDeque(DenoiserResult),
 /// FFT wrapper for the pipeline that holds the FFT state,
 /// our chosen window function, and that can process multiple
 /// channels of audio data at once (operating on Segments)
@@ -89,7 +92,7 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     errdefer denoiser.deinit();
 
     // TODO: Find optimal length?
-    var denoiser_res_queue = try FixedCapacityDeque(DenoiserResult).init(allocator, 20);
+    var denoiser_res_queue = try FixedCapacityDeque(DenoiserResult).init(allocator, 100);
     errdefer denoiser_res_queue.deinit();
 
     var denoiser_fft_buffer = try SegmentWriter.init(allocator, n_channels, config.fft_size);
@@ -98,7 +101,7 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     errdefer denoiser_fft_buffer.deinit();
 
     // TODO: Find optimal length?
-    var fft_input_queue = try FixedCapacityDeque(Segment).init(allocator, 20);
+    var fft_input_queue = try FixedCapacityDeque(DenoiserResult).init(allocator, 100);
     errdefer fft_input_queue.deinit();
 
     var pipeline_fft = try PipelineFFT.init(allocator, .{
@@ -221,7 +224,7 @@ fn denoiserStep(self: *Self) !void {
 
 fn denoiserFftBufferStep(self: *Self) !void {
     while (self.denoiser_result_queue.length() > 0) {
-        var denoiser_result = try self.denoiser_result_queue.popFront();
+        var denoiser_result: DenoiserResult = try self.denoiser_result_queue.popFront();
         defer denoiser_result.deinit();
 
         var segment: Segment = denoiser_result.segment;
@@ -237,13 +240,23 @@ fn denoiserFftBufferStep(self: *Self) !void {
             const expected_to_write = segment.length - offset;
             const buffer_is_full = written != expected_to_write;
 
+            self.fft_buffer_rnn_vad = @max(self.fft_buffer_rnn_vad, denoiser_result.vad);
+
             if (buffer_is_full) {
                 var fft_segment = self.denoiser_fft_buffer.segment;
                 var segment_copy = try fft_segment.copy(self.allocator);
                 errdefer segment_copy.deinit();
 
+                var fft_input = DenoiserResult{
+                    .index = segment_copy.index,
+                    .length = segment_copy.length,
+                    .segment = segment_copy,
+                    .vad = self.fft_buffer_rnn_vad,
+                };
+                self.fft_buffer_rnn_vad = 0;
+
                 // TODO: We could avoid this queue and just run the FFT directly
-                try self.fft_input_queue.pushBack(segment_copy);
+                try self.fft_input_queue.pushBack(fft_input);
                 offset += written;
 
                 // Global index of the first sample in the next segment
@@ -261,19 +274,19 @@ fn denoiserFftBufferStep(self: *Self) !void {
 
 fn fftStep(self: *Self) !void {
     while (self.fft_input_queue.length() > 0) {
-        var fft_in_segment: Segment = try self.fft_input_queue.popFront();
-        defer fft_in_segment.deinit();
+        var fft_input: DenoiserResult = try self.fft_input_queue.popFront();
+        defer fft_input.deinit();
 
-        var result: PipelineFFT.Result = try self.pipeline_fft.fft(fft_in_segment);
+        var result: PipelineFFT.Result = try self.pipeline_fft.fft(fft_input.segment);
         defer result.deinit();
 
         // std.debug.print("FFT input segment: {d}\n", .{fft_in_segment.index / self.pipeline.config.sample_rate});
 
-        try self.speechStep(result);
+        try self.speechStep(result, fft_input.vad);
     }
 }
 
-fn speechStep(self: *Self, result: PipelineFFT.Result) !void {
+fn speechStep(self: *Self, result: PipelineFFT.Result, rnn_vad: f32) !void {
     const sample_rate = self.pipeline.config.sample_rate;
     const sample_rate_f = @intToFloat(f32, sample_rate);
     const config = self.config;
@@ -283,19 +296,21 @@ fn speechStep(self: *Self, result: PipelineFFT.Result) !void {
     defer self.allocator.free(channel_volume);
     try self.pipeline_fft.averageVolumeInBand(result, config.speech_min_freq, config.speech_max_freq, channel_volume);
 
-    // Take the minimum of all channels as it's likely the one containing less engine noise, and therefore more accurate
     var min_volume: f32 = 999;
-    for (channel_volume) |loudness| {
-        if (loudness < min_volume) min_volume = loudness;
+    var max_volume: f32 = 0;
+    for (channel_volume) |volume| {
+        if (volume < min_volume) min_volume = volume;
+        if (volume > max_volume) max_volume = volume;
     }
 
-    // std.debug.print("Speech loudness: {d: >10.5} \n", .{short_term * 100});
+    // std.debug.print("Speech volume: {d: >10.5} \n", .{short_term * 100});
 
     // Number of consecutive samples above the threshold before the VAD opens
     const min_consecutive_to_open = @floatToInt(usize, sample_rate_f * config.min_consecutive_ms_to_open / 1000);
     // Number of consecutive samples below the threshold before the VAD closes
     const max_gap_samples = @floatToInt(usize, sample_rate_f * config.max_speech_gap_ms / 1000);
 
+    // Use the minimum for activation as it's likely the one containing less engine noise, and therefore more accurate
     const short_term = self.short_term_speech_volume.push(min_volume);
 
     const threshold_base = self.long_term_speech_volume.last_avg orelse config.initial_long_term_avg orelse short_term;
@@ -343,7 +358,7 @@ fn speechStep(self: *Self, result: PipelineFFT.Result) !void {
             } else if (closing_duration_met) {
                 self.speech_state = .closed;
                 // std.debug.print("Mic closed.\n", .{});
-                try self.handleSpeechEvent();
+                try self.handleSpeechEvent(rnn_vad);
             }
         },
     }
@@ -354,7 +369,7 @@ fn speechStep(self: *Self, result: PipelineFFT.Result) !void {
     // );
 }
 
-fn handleSpeechEvent(self: *Self) !void {
+fn handleSpeechEvent(self: *Self, rnn_vad: f32) !void {
     const sample_from = self.speech_start_index;
     const sample_to = self.speech_end_index;
     const length_samples = sample_to - sample_from;
@@ -366,18 +381,15 @@ fn handleSpeechEvent(self: *Self) !void {
     const length_realtime = @intToFloat(f32, length_samples) / sample_rate_f;
     const speech_duration_met = length_realtime * 1000 >= config.min_vad_duration_ms;
 
-    // std.debug.print("Speech duration: {d: >6.2}", .{length_realtime});
-
     if (speech_duration_met) {
         const segment = VADSegment{
             .sample_from = sample_from,
             .sample_to = sample_to,
+            .debug_rnn_vad = rnn_vad,
         };
         _ = try self.vad_segments.append(segment);
 
-        // std.debug.print(" (ok)\n", .{});
-    } else {
-        // Discard, VAD too short
-        // std.debug.print(" (too short)\n", .{});
+        const debug_len_s = @intToFloat(f32, length_samples) / sample_rate_f;
+        std.debug.print("VAD Segment: {d: >6.2}s  | Max. RNNoise VAD: {d: >6.2}%\n", .{debug_len_s, rnn_vad*100});
     }
 }

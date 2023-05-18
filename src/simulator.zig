@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const AudioPipeline = @import("AudioPipeline.zig");
-const AudioBuffer = @import("audio_utils/AudioBuffer.zig");
+const AudioFileStream = @import("audio_utils/AudioFileStream.zig");
 const VAD = @import("AudioPipeline/VAD.zig");
 const clap = @import("clap");
 const Evaluator = @import("Evaluator.zig");
@@ -11,30 +11,47 @@ const exit = std.os.exit;
 var stderr = std.io.getStdErr();
 var stdout = std.io.getStdOut();
 
-pub fn runVADSingle(allocator: Allocator, file: AudioBuffer) ![]Evaluator.SpeechSegment {
+pub fn runVADSingle(allocator: Allocator, stream: *AudioFileStream) ![]Evaluator.SpeechSegment {
     const pipeline = try AudioPipeline.init(allocator, .{
-        .sample_rate = file.sample_rate,
-        .n_channels = file.n_channels,
+        .sample_rate = stream.sample_rate,
+        .n_channels = stream.n_channels,
     });
     defer pipeline.deinit();
 
-    const sample_rate = file.sample_rate;
-    const frame_size = 2048;
-    const steps = file.length / frame_size + @boolToInt(file.length % frame_size != 0);
+    const sample_rate = stream.sample_rate;
+    const frame_size = sample_rate * 1;
 
-    var framed_channel_pcm = try allocator.alloc([]f32, file.n_channels);
-    defer allocator.free(framed_channel_pcm);
+    // The backing slice of slices for our audio samples
+    var backing_channel_pcm = try allocator.alloc([]f32, stream.n_channels);
+    // The slice we'll pass to the audio pipeline, trimmed to the actual number of samples read.
+    var trimmed_channel_pcm = try allocator.alloc([]f32, stream.n_channels);
+    var channels_allocated: usize = 0;
+    defer {
+        for (0..channels_allocated) |i| allocator.free(backing_channel_pcm[i]);
+        allocator.free(backing_channel_pcm);
+        allocator.free(trimmed_channel_pcm);
+    }
+    // Initialize the backing channel slices
+    for (0..backing_channel_pcm.len) |i| {
+        backing_channel_pcm[i] = try allocator.alloc(f32, frame_size);
+        channels_allocated += 1;
+    }
 
-    for (0..steps) |step_idx| {
-        const from = step_idx * frame_size;
-        const to = @min(file.length, from + frame_size);
+    // Read frames and pass them to the AudioPipeline
+    var total_samples_read: usize = 0;
+    while (true) {
+        const samples_read = try stream.read(backing_channel_pcm, frame_size, 0);
+        if (samples_read == 0) break;
 
-        for (0..file.n_channels) |channel_idx| {
-            framed_channel_pcm[channel_idx] = file.channel_pcm_buf[channel_idx][from..to];
+        for (0..stream.n_channels) |i| {
+            trimmed_channel_pcm[i] = backing_channel_pcm[i][0..samples_read];
         }
 
-        try pipeline.pushSamples(framed_channel_pcm);
+        try pipeline.pushSamples(trimmed_channel_pcm);
+        total_samples_read += samples_read;
     }
+
+    std.debug.print("Processed: {d} samples\n", .{total_samples_read});
 
     const vad_segments = try pipeline.vad.?.vad_segments.toOwnedSlice();
     defer allocator.free(vad_segments);
@@ -46,9 +63,12 @@ pub fn runVADSingle(allocator: Allocator, file: AudioBuffer) ![]Evaluator.Speech
         const from_sec = @intToFloat(f32, vad_segment.sample_from) / @intToFloat(f32, sample_rate);
         const to_sec = @intToFloat(f32, vad_segment.sample_to) / @intToFloat(f32, sample_rate);
 
+        const debug_info = try std.fmt.allocPrint(allocator, "rnn:{d:.2}%", .{vad_segment.debug_rnn_vad * 100});
+
         speech_segments[i] = .{
             .from_sec = from_sec,
             .to_sec = to_sec,
+            .debug_info = debug_info,
         };
     }
 
@@ -101,23 +121,22 @@ pub fn main() !void {
 
     const megabyte = 1024 * 1024;
 
-
     // Read inputs and maybe create output
     const ref_contents = try fs.Dir.readFileAlloc(fs.cwd(), allocator, ref_file_path.?, 10 * megabyte);
     defer allocator.free(ref_contents);
 
     var out_file = if (res.args.output) |of| try fs.Dir.createFile(fs.cwd(), of, .{}) else null;
 
-    var audio_buffer = try AudioBuffer.loadFromFile(allocator, input_file_path_Z);
-    defer audio_buffer.deinit();
+    var audio_stream = try AudioFileStream.open(allocator, input_file_path_Z);
+    defer audio_stream.close();
 
     const ref_segments = try Evaluator.parseAudacityTxt(allocator, ref_contents);
     defer allocator.free(ref_segments);
 
-    try stdout_w.print("Loaded {} samples from audio file. Running...\n", .{audio_buffer.length});
+    try stdout_w.print("Streaming {d:.2}s from audio file. Running...\n", .{audio_stream.lengthSeconds()});
 
     // Run VAD and evaluate results
-    const simulated_segments = try runVADSingle(allocator, audio_buffer);
+    const simulated_segments = try runVADSingle(allocator, &audio_stream);
     defer allocator.free(simulated_segments);
 
     var evaluator = try Evaluator.initAndRun(allocator, simulated_segments, ref_segments);
@@ -134,11 +153,20 @@ pub fn main() !void {
 
     // Maybe write output segments
     if (out_file) |out_f| {
+        defer out_f.close();
+
         var out_fw = out_f.writer();
-        defer out_fw.close();
 
         for (evaluator.input_segments) |segment| {
-            try out_fw.print("{d:.4}\t{d:.4}\t{s}\n", .{ segment.from_sec, segment.to_sec, @tagName(segment.match) });
+            const comment = try segment.toComment(allocator);
+            defer allocator.free(comment);
+
+            try out_fw.print("{d:.4}\t{d:.4}\t{s}\n", .{ segment.from_sec, segment.to_sec, comment });
+        }
+
+        for (evaluator.reference_segments) |segment| {
+            if (segment.match == .matched) continue;
+            try out_fw.print("{d:.4}\t{d:.4}\t{s}\n", .{ segment.from_sec, segment.to_sec, "missed" });
         }
     }
 }
