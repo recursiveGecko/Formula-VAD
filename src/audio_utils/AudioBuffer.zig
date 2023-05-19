@@ -28,9 +28,12 @@ pub fn loadFromFile(allocator: Allocator, path: []const u8) !Self {
     }
 
     const read_chunk_size = stream.sample_rate * 10;
+    var interleaved_buffer = try allocator.alloc(f32, read_chunk_size * stream.n_channels);
+    defer allocator.free(interleaved_buffer);
+
     var offset: usize = 0;
     while (true) {
-        const samples_read = try stream.read(channel_pcm_buf, offset, read_chunk_size);
+        const samples_read = try stream.read(interleaved_buffer, channel_pcm_buf, offset, read_chunk_size);
         if (samples_read < read_chunk_size) break;
         offset += samples_read;
     }

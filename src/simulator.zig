@@ -241,6 +241,9 @@ pub fn simulateVAD(allocator: Allocator, audio: *AudioSource) ![]VAD.VADSegment 
         var stream = audio.stream;
         const frame_size = audio_read_frame_size;
 
+        // Buffer where interleaved samples are temporarily stored
+        var interleaved_buffer = try allocator.alloc(f32, frame_size * stream.n_channels);
+        defer allocator.free(interleaved_buffer);
         // The backing slice of slices for our audio samples
         var backing_channel_pcm = try allocator.alloc([]f32, audio.nChannels());
         // The slice we'll pass to the audio pipeline, trimmed to the actual number of samples read.
@@ -259,7 +262,7 @@ pub fn simulateVAD(allocator: Allocator, audio: *AudioSource) ![]VAD.VADSegment 
 
         // Read frames and pass them to the AudioPipeline
         while (true) {
-            const samples_read = try stream.read(backing_channel_pcm, 0, frame_size);
+            const samples_read = try stream.read(interleaved_buffer, backing_channel_pcm, 0, frame_size);
             if (samples_read == 0) break;
 
             for (0..audio.nChannels()) |i| {

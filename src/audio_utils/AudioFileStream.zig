@@ -46,8 +46,11 @@ pub fn open(allocator: Allocator, path: []const u8) !Self {
 /// Returns the number of samples read.
 /// Returns an error if the destination is full, callers should close the stream
 /// when the number of samples read is less than the number of samples expected.
+/// The caller must provide a temporary buffer that samples will be read into
+/// before they are deinterleaved into the destination buffer. Buffer must be
+/// `max_samples` * `n_channels` in length.
 ///
-pub fn read(self: *Self, result_pcm: [][]f32, offset: usize, max_samples: usize) !usize {
+pub fn read(self: *Self, interleaved_buffer: []f32, result_pcm: [][]f32, offset: usize, max_samples: usize) !usize {
     if (self.sf_file == null) {
         return error.FileNotOpen;
     }
@@ -63,12 +66,8 @@ pub fn read(self: *Self, result_pcm: [][]f32, offset: usize, max_samples: usize)
         return error.DestinationBufferFull;
     }
 
-    // samples on different channels are interleaved
-    var interleaved_samples = try self.allocator.alloc(f32, read_chunk_size);
-    defer self.allocator.free(interleaved_samples);
-
     // Read samples into the interleaved buffer
-    const c_samples_read = sndfile.sf_read_float(sf_file, interleaved_samples.ptr, @intCast(i64, read_chunk_size));
+    const c_samples_read = sndfile.sf_read_float(sf_file, interleaved_buffer.ptr, @intCast(i64, read_chunk_size));
     const samples_read = @intCast(usize, c_samples_read);
 
     // Organize samples into separated channel buffers
@@ -77,7 +76,7 @@ pub fn read(self: *Self, result_pcm: [][]f32, offset: usize, max_samples: usize)
         const channel_idx = i % self.n_channels;
         if (channel_idx == 0) sample_index += 1;
 
-        result_pcm[channel_idx][@intCast(usize, sample_index)] = interleaved_samples[i];
+        result_pcm[channel_idx][@intCast(usize, sample_index)] = interleaved_buffer[i];
     }
 
     return samples_read / self.n_channels;
