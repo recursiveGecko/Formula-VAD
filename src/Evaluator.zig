@@ -9,7 +9,6 @@ var stderr = std.io.getStdErr();
 var stdout = std.io.getStdOut();
 const megabyte = 1024 * 1024;
 
-
 pub const SpeechSegment = struct {
     const Match = enum {
         unmatched,
@@ -43,7 +42,7 @@ pub const SpeechSegment = struct {
         var prefix = @tagName(self.match);
         if (self.match == .matched) prefix = "";
 
-        return try std.fmt.allocPrint(allocator, "{s} {s}", .{prefix, self.debug_info orelse ""});
+        return try std.fmt.allocPrint(allocator, "{s} {s}", .{ prefix, self.debug_info orelse "" });
     }
 };
 
@@ -56,6 +55,26 @@ pub const Stats = struct {
     false_positive_rate: f32 = 0,
     false_negatives: usize = 0,
     false_negative_rate: f32 = 0,
+};
+
+pub const AggregateStats = struct {
+    total_input_events: usize = 0,
+    total_reference_events: usize = 0,
+    true_positives: usize = 0,
+    true_positive_rate: f32 = 0,
+    false_positives: usize = 0,
+    false_positive_rate: f32 = 0,
+    false_negatives: usize = 0,
+    false_negative_rate: f32 = 0,
+    min_false_positive_rate: f32 = 2,
+    max_false_positive_rate: f32 = -2,
+    avg_false_positive_rate: f32 = undefined,
+    min_false_negative_rate: f32 = 2,
+    max_false_negative_rate: f32 = -2,
+    avg_false_negative_rate: f32 = undefined,
+    min_true_positive_rate: f32 = 2,
+    max_true_positive_rate: f32 = -2,
+    avg_true_positive_rate: f32 = undefined,
 };
 
 const Self = @This();
@@ -122,7 +141,7 @@ fn findOverlapping(self: *Self, target: SpeechSegment, others: []SpeechSegment) 
 // and the fact that one VAD segment could correspond to multiple reference
 // segments and vice versa.
 // Contributions welcome.
-pub fn buildStatistics(self: *Self) Stats {
+pub fn buildStatistics(self: Self) Stats {
     var stats = Stats{
         .total_input_events = self.input_segments.len,
         .total_reference_events = self.reference_segments.len,
@@ -246,4 +265,62 @@ pub fn parseAudacityTxt(allocator: Allocator, txt: []const u8) ![]SpeechSegment 
     }
 
     return segments.toOwnedSlice();
+}
+
+pub fn serializeToAudacityTxt(self: *Self, allocator: Allocator) ![]const u8 {
+    var contents_array = std.ArrayList(u8).init(allocator);
+    var writer = contents_array.writer();
+    defer contents_array.deinit();
+
+    for (self.input_segments) |segment| {
+        const comment = try segment.toComment(allocator);
+        defer allocator.free(comment);
+
+        try writer.print("{d:.4}\t{d:.4}\t{s}\n", .{ segment.from_sec, segment.to_sec, comment });
+    }
+
+    for (self.reference_segments) |segment| {
+        if (segment.match == .matched) continue;
+        try writer.print("{d:.4}\t{d:.4}\t{s}\n", .{ segment.from_sec, segment.to_sec, "missed" });
+    }
+
+    return contents_array.toOwnedSlice();
+}
+
+pub fn aggregateStats(stats: []Stats) AggregateStats {
+    var agg = AggregateStats{};
+
+    var sum_true_positive_rate: f32 = 0.0;
+    var sum_false_positive_rate: f32 = 0.0;
+    var sum_false_negative_rate: f32 = 0.0;
+
+    for (stats) |s| {
+        agg.true_positives += s.true_positives;
+        agg.false_positives += s.false_positives;
+        agg.false_negatives += s.false_negatives;
+        agg.total_input_events += s.total_input_events;
+        agg.total_reference_events += s.total_reference_events;
+
+        if (s.true_positive_rate < agg.min_true_positive_rate) agg.min_true_positive_rate = s.true_positive_rate;
+        if (s.true_positive_rate > agg.max_true_positive_rate) agg.max_true_positive_rate = s.true_positive_rate;
+        sum_true_positive_rate += s.true_positive_rate;
+
+        if (s.false_positive_rate < agg.min_false_positive_rate) agg.min_false_positive_rate = s.false_positive_rate;
+        if (s.false_positive_rate > agg.max_false_positive_rate) agg.max_false_positive_rate = s.false_positive_rate;
+        sum_false_positive_rate += s.false_positive_rate;
+
+        if (s.false_negative_rate < agg.min_false_negative_rate) agg.min_false_negative_rate = s.false_negative_rate;
+        if (s.false_negative_rate > agg.max_false_negative_rate) agg.max_false_negative_rate = s.false_negative_rate;
+        sum_false_negative_rate += s.false_negative_rate;
+    }
+
+    agg.true_positive_rate = @intToFloat(f32, agg.true_positives) / @intToFloat(f32, agg.total_input_events);
+    agg.false_positive_rate = @intToFloat(f32, agg.false_positives) / @intToFloat(f32, agg.total_input_events);
+    agg.false_negative_rate = @intToFloat(f32, agg.false_negatives) / @intToFloat(f32, agg.total_reference_events);
+
+    agg.avg_true_positive_rate = sum_true_positive_rate / @intToFloat(f32, stats.len);
+    agg.avg_false_positive_rate = sum_false_positive_rate / @intToFloat(f32, stats.len);
+    agg.avg_false_negative_rate = sum_false_negative_rate / @intToFloat(f32, stats.len);
+
+    return agg;
 }

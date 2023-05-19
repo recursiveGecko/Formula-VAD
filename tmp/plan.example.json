@@ -1,0 +1,15 @@
+{
+  "instances": [
+    {
+      "name": "Sainz",
+      "audio_path": "1000006698_55_Carlos_Sainz.ogg",
+      "ref_path": "1000006698_27_Nico_Hulkenberg.txt"
+    },
+    {
+      "name": "Hulkenberg",
+      "audio_path": "1000006698_27_Nico_Hulkenberg.ogg",
+      "ref_path": "1000006698_27_Nico_Hulkenberg.txt"
+    }
+  ],
+  "vad_config": {}
+}

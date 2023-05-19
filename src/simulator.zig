@@ -27,6 +27,43 @@ pub const std_options = struct {
     };
 };
 
+const SimulationJSON = struct {
+    instances: []SimulationInstanceJSON,
+    vad_config: ?VAD.Config = null,
+    output_dir: ?[]const u8 = null,
+};
+
+const SimulationInstanceJSON = struct {
+    name: []const u8,
+    audio_path: []const u8,
+    ref_path: []const u8,
+};
+
+const Simulation = struct {
+    instances: []SimulationInstance,
+};
+
+const SimulationInstance = struct {
+    name: []const u8,
+    audio_stream: *AudioFileStream,
+    vad_config: VAD.Config,
+    output_dir: []const u8,
+    reference_segments: []const Evaluator.SpeechSegment,
+    self_cleanup_allocator: Allocator,
+    evaluator: ?Evaluator = null,
+
+    pub fn deinit(self: *@This()) void {
+        const alloc = self.self_cleanup_allocator;
+
+        self.audio_stream.close();
+        alloc.destroy(self.audio_stream);
+        alloc.free(self.name);
+        alloc.free(self.output_dir);
+        alloc.free(self.reference_segments);
+        if (self.evaluator) |*e| e.deinit();
+    }
+};
+
 const cli_params = clap.parseParamsComptime(
     \\-h, --help             Display this help and exit
     \\-i, --input <str>      Simulation plan (path to JSON)
@@ -64,87 +101,15 @@ pub fn main() !void {
 
     const plan_json_path = res.args.input.?;
 
+    // Initialize and run the simulation
     var simulation = initialize(allocator, plan_json_path) catch |err| {
         try stderr_w.print("Failed to initialize simulation: {}\n", .{err});
         exit(1);
     };
 
     try runAll(allocator, simulation);
-    // try runInstance(allocator, &simulation.instances[0]);
-
-    // var out_file = if (res.args.output) |of| try fs.Dir.createFile(fs.cwd(), of, .{}) else null;
-
-    // // Run VAD and evaluate results
-
-    // var evaluator = try Evaluator.initAndRun(allocator, simulated_segments, ref_segments);
-    // defer evaluator.deinit();
-
-    // const stats = evaluator.buildStatistics();
-
-    // try stdout_w.print("Statistics:\n", .{});
-    // try stdout_w.print("Real events:     {}\n", .{stats.total_reference_events});
-    // try stdout_w.print("VAD events:      {}\n", .{stats.total_input_events});
-    // try stdout_w.print("True positives:  {}\n", .{stats.true_positives});
-    // try stdout_w.print("False positives: {}\n", .{stats.false_positives});
-    // try stdout_w.print("False negatives: {}\n", .{stats.false_negatives});
-
-    // // Maybe write output segments
-    // if (out_file) |out_f| {
-    //     defer out_f.close();
-
-    //     var out_fw = out_f.writer();
-
-    //     for (evaluator.input_segments) |segment| {
-    //         const comment = try segment.toComment(allocator);
-    //         defer allocator.free(comment);
-
-    //         try out_fw.print("{d:.4}\t{d:.4}\t{s}\n", .{ segment.from_sec, segment.to_sec, comment });
-    //     }
-
-    //     for (evaluator.reference_segments) |segment| {
-    //         if (segment.match == .matched) continue;
-    //         try out_fw.print("{d:.4}\t{d:.4}\t{s}\n", .{ segment.from_sec, segment.to_sec, "missed" });
-    //     }
-    // }
+    try printReport(allocator, simulation.*);
 }
-
-const SimulationJSON = struct {
-    instances: []SimulationInstanceJSON,
-    vad_config: ?VAD.Config = null,
-    save_segments: bool = false,
-    output_dir: ?[]const u8 = null,
-};
-
-const SimulationInstanceJSON = struct {
-    name: []const u8,
-    audio_path: []const u8,
-    ref_path: []const u8,
-};
-
-const Simulation = struct {
-    instances: []SimulationInstance,
-};
-
-const SimulationInstance = struct {
-    name: []const u8,
-    audio_stream: *AudioFileStream,
-    reference_segments: []const Evaluator.SpeechSegment,
-    vad_config: VAD.Config,
-    output_dir: []const u8,
-    result: ?[]Evaluator.SpeechSegment,
-    self_cleanup_allocator: Allocator,
-
-    pub fn deinit(self: *@This()) void {
-        const alloc = self.self_cleanup_allocator;
-
-        self.audio_stream.close();
-        alloc.destroy(self.audio_stream);
-        alloc.free(self.name);
-        alloc.free(self.output_dir);
-        alloc.free(self.reference_segments);
-        if (self.result) |res| alloc.free(res);
-    }
-};
 
 pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
     const plan_contents = try fs.Dir.readFileAlloc(fs.cwd(), allocator, json_path, 10 * megabyte);
@@ -162,9 +127,9 @@ pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
         allocator.free(instances);
     }
 
-    // TODO: Maybe deallocate instances on error
     for (plan_json.instances, 0..) |instance_json, i| {
         instances[i] = try initializeInstance(allocator, json_path, instance_json);
+        instances_alloc += 1;
     }
 
     var simulation = try allocator.create(Simulation);
@@ -205,10 +170,10 @@ pub fn initializeInstance(
         .name = name,
         .output_dir = "",
         .audio_stream = audio_stream,
-        .result = null,
         .reference_segments = ref_segments,
         .vad_config = .{},
         .self_cleanup_allocator = allocator,
+        .evaluator = null,
     };
 }
 
@@ -319,5 +284,77 @@ pub fn storeResult(
         };
     }
 
-    instance.result = speech_segments;
+    instance.evaluator = try Evaluator.initAndRun(main_allocator, speech_segments, instance.reference_segments);
+    errdefer instance.evaluator.deinit();
+}
+
+
+pub fn printReport(allocator: Allocator, simulation: Simulation) !void {
+    // Aggregate results and print them
+    var all_stats_list = std.ArrayList(Evaluator.Stats).init(allocator);
+    errdefer all_stats_list.deinit();
+
+    for (simulation.instances) |instance| {
+        if (instance.evaluator) |e| {
+            const stats = e.buildStatistics();
+            try all_stats_list.append(stats);
+
+            try stdout_w.print("\n==> {s}\n", .{instance.name});
+            try stdout_w.print("Reference events:      {d: >5}\n", .{stats.total_reference_events});
+            try stdout_w.print("Simulated events:      {d: >5}\n", .{stats.total_input_events});
+            try stdout_w.print(
+                "Correct radios  (TP):  {d: >5} ({d: >5.1}%) \n",
+                .{ stats.true_positives, stats.true_positive_rate * 100 },
+            );
+            try stdout_w.print(
+                "False radios    (FP):  {d: >5} ({d: >5.1}%) \n",
+                .{ stats.false_positives, stats.false_positive_rate * 100 },
+            );
+            try stdout_w.print(
+                "Missed radios   (FN):  {d: >5} ({d: >5.1}%) \n",
+                .{ stats.false_negatives, stats.false_negative_rate * 100 },
+            );
+        } else {
+            log.err("Instance {s} didn't return any results!", .{instance.name});
+        }
+    }
+
+    const all_stats = try all_stats_list.toOwnedSlice();
+    defer allocator.free(all_stats);
+
+    const agg = Evaluator.aggregateStats(all_stats);
+
+    try stdout_w.print("\n===== Aggregate stats =====\n\n", .{});
+    try stdout_w.print("Reference events:      {d: >5}\n", .{agg.total_reference_events});
+    try stdout_w.print("Simulated events:      {d: >5}\n", .{agg.total_input_events});
+    try stdout_w.print(
+        "Correct radios  (TP):  {d: >5} ({d: >5.1}%)  |  Min: {d: >6.2}%  Max: {d: >6.2}%  Avg: {d: >6.2}%\n",
+        .{
+            agg.true_positives,
+            agg.true_positive_rate * 100,
+            agg.min_true_positive_rate * 100,
+            agg.max_true_positive_rate * 100,
+            agg.avg_true_positive_rate * 100,
+        },
+    );
+    try stdout_w.print(
+        "False radios    (FP):  {d: >5} ({d: >5.1}%)  |  Min: {d: >6.2}%  Max: {d: >6.2}%  Avg: {d: >6.2}%\n",
+        .{
+            agg.false_positives,
+            agg.false_positive_rate * 100,
+            agg.min_false_positive_rate * 100,
+            agg.max_false_positive_rate * 100,
+            agg.avg_false_positive_rate * 100,
+        },
+    );
+    try stdout_w.print(
+        "Missed radios   (FN):  {d: >5} ({d: >5.1}%)  |  Min: {d: >6.2}%  Max: {d: >6.2}%  Avg: {d: >6.2}%\n",
+        .{
+            agg.false_negatives,
+            agg.false_negative_rate * 100,
+            agg.min_false_negative_rate * 100,
+            agg.max_false_negative_rate * 100,
+            agg.avg_false_negative_rate * 100,
+        },
+    );
 }
