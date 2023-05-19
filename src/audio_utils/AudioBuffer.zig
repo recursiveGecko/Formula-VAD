@@ -9,6 +9,7 @@ n_channels: usize,
 sample_rate: usize,
 channel_pcm_buf: [][]f32,
 length: usize,
+duration_seconds: f32,
 
 pub fn loadFromFile(allocator: Allocator, path: []const u8) !Self {
     var stream = try AudioFileStream.open(allocator, path);
@@ -40,6 +41,7 @@ pub fn loadFromFile(allocator: Allocator, path: []const u8) !Self {
         .sample_rate = stream.sample_rate,
         .channel_pcm_buf = channel_pcm_buf,
         .length = stream.length,
+        .duration_seconds = @intToFloat(f32, stream.length) / @intToFloat(f32, stream.sample_rate),
     };
 }
 
