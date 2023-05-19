@@ -13,6 +13,7 @@ pub const Config = struct {
     n_channels: usize,
     buffer_length: ?usize = null,
     vad_config: VAD.Config = .{},
+    skip_processing: bool = false,
 };
 
 allocator: Allocator,
@@ -34,7 +35,7 @@ pub fn init(allocator: Allocator, config: Config) !*Self {
     });
 
     // TODO: Calculate a more optional length?
-    self.buffer_length = config.buffer_length orelse config.sample_rate * 10;
+    self.buffer_length = config.buffer_length orelse config.sample_rate * 30;
 
     self.channel_pcm_buf = try allocator.alloc([]f32, config.n_channels);
     errdefer allocator.free(self.channel_pcm_buf.?);
@@ -152,6 +153,8 @@ pub fn pushSamples(self: *Self, channel_pcm: []const []const f32) !void {
 }
 
 pub fn runPipeline(self: *Self) !void {
+    if (self.config.skip_processing) return;
+
     try self.vad.?.run();
 }
 
@@ -230,4 +233,46 @@ pub fn durationToSamples(sample_rate: usize, buffer_duration: f32) usize {
 
 test {
     _ = @import("./AudioPipeline/SegmentWriter.zig");
+}
+
+const expect = std.testing.expect;
+const expectEqual = std.testing.expectEqual;
+const expectEqualSlices = std.testing.expectEqualSlices;
+const test_allocator = std.testing.allocator;
+
+test "pushSamples() ring buffer handling" {
+    var pipeline = try init(test_allocator, .{
+        .skip_processing = true,
+        .sample_rate = 48000,
+        .buffer_length = 5,
+        .n_channels = 1,
+    });
+    defer pipeline.deinit();
+
+    var pcm = pipeline.channel_pcm_buf.?[0];
+
+    try pipeline.pushSamples(&.{&.{0, 1, 2}});
+    // write index:          v
+    // expected:   [0, 1, 2, _, _]
+    try expectEqualSlices(f32, &.{ 0, 1, 2 }, pcm[0..3]);
+
+    try pipeline.pushSamples(&.{&.{4, 5, 6, 7, 8, 9}});
+    // write index:             v
+    // expected:   [6, 7, 8, 9, 5]
+    try expectEqualSlices(f32, &.{ 6, 7, 8, 9, 5 }, pcm);
+
+    try pipeline.pushSamples(&.{&.{2, 3, 4}});
+    // write index:       v
+    // expected:   [3, 4, 8, 9, 2]
+    try expectEqualSlices(f32, &.{ 3, 4, 8, 9, 2 }, pcm);
+
+    try pipeline.pushSamples(&.{&.{0, 0, 0, 0, 0, 50, 60, 70, 80, 90}});
+    // write index:         v
+    // expected:   [80, 90, 50, 60, 70]
+    try expectEqualSlices(f32, &.{ 80, 90, 50, 60, 70 }, pcm);
+
+    try pipeline.pushSamples(&.{&.{-1, 0, 2, 0}});
+    // write index:    v
+    // expected:   [0, 90, -1, 0, 2]
+    try expectEqualSlices(f32, &.{ 0, 90, -1, 0, 2 }, pcm);
 }
