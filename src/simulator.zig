@@ -70,6 +70,7 @@ pub fn main() !void {
     };
 
     try runAll(allocator, simulation);
+    // try runInstance(allocator, &simulation.instances[0]);
 
     // var out_file = if (res.args.output) |of| try fs.Dir.createFile(fs.cwd(), of, .{}) else null;
 
@@ -225,21 +226,24 @@ pub fn runAll(allocator: Allocator, simulation: *Simulation) !void {
 }
 
 pub fn runInstance(main_allocator: Allocator, instance: *SimulationInstance) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{
+        // .verbose_log = true,
+    }){};
     defer _ = gpa.deinit();
-    // var arena = std.heap.ArenaAllocator.init(main_allocator);
-    // defer arena.deinit();
+
+    var thread_allocator = gpa.allocator();
 
     log.info(
         "{s}: Streaming {d:.2}s from audio file. Running...",
         .{ instance.name, instance.audio_stream.durationSeconds() },
     );
-    var segments = try simulateVAD(gpa.allocator(), instance.audio_stream);
+    var vad_segments = try simulateVAD(thread_allocator, instance.audio_stream);
+    defer thread_allocator.free(vad_segments);
 
-    instance.result = try main_allocator.dupe(Evaluator.SpeechSegment, segments);
+    try storeResult(main_allocator, instance, vad_segments);
 }
 
-pub fn simulateVAD(allocator: Allocator, audio: *AudioFileStream) ![]Evaluator.SpeechSegment {
+pub fn simulateVAD(allocator: Allocator, audio: *AudioFileStream) ![]VAD.VADSegment {
     const pipeline = try AudioPipeline.init(allocator, .{
         .sample_rate = audio.sample_rate,
         .n_channels = audio.n_channels,
@@ -283,17 +287,27 @@ pub fn simulateVAD(allocator: Allocator, audio: *AudioFileStream) ![]Evaluator.S
     log.info("Processed: {d} samples", .{total_samples_read});
 
     const vad_segments = try pipeline.vad.?.vad_segments.toOwnedSlice();
-    defer allocator.free(vad_segments);
+    errdefer allocator.free(vad_segments);
 
-    var speech_segments = try allocator.alloc(Evaluator.SpeechSegment, vad_segments.len);
-    errdefer allocator.free(speech_segments);
+    return vad_segments;
+}
+
+pub fn storeResult(
+    main_allocator: Allocator,
+    instance: *SimulationInstance,
+    vad_segments: []VAD.VADSegment,
+) !void {
+    var speech_segments = try main_allocator.alloc(Evaluator.SpeechSegment, vad_segments.len);
+    errdefer main_allocator.free(speech_segments);
+
+    const sample_rate = instance.audio_stream.sample_rate;
 
     for (vad_segments, 0..) |vad_segment, i| {
         const from_sec = @intToFloat(f32, vad_segment.sample_from) / @intToFloat(f32, sample_rate);
         const to_sec = @intToFloat(f32, vad_segment.sample_to) / @intToFloat(f32, sample_rate);
 
         const debug_info = try std.fmt.allocPrint(
-            allocator,
+            main_allocator,
             "rnn:{d:.2}% vr:{d:.2}",
             .{ vad_segment.debug_rnn_vad * 100, vad_segment.debug_avg_speech_vol_ratio },
         );
@@ -305,5 +319,5 @@ pub fn simulateVAD(allocator: Allocator, audio: *AudioFileStream) ![]Evaluator.S
         };
     }
 
-    return speech_segments;
+    instance.result = speech_segments;
 }
