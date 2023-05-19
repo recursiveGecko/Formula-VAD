@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const AudioPipeline = @import("AudioPipeline.zig");
 const AudioFileStream = @import("audio_utils/AudioFileStream.zig");
@@ -20,9 +21,10 @@ const megabyte = 1024 * 1024;
 const seconds_per_hour = 3600;
 
 // Number of audio samples to read at a time when streaming audio
-const audio_read_frame_size = 48000;
+const audio_read_frame_size = 48000 * 10;
 // Whether to preload audio into memory or stream it
 const preload_audio = false;
+const verbose_allocation_log = false;
 
 /// stdlib option overrides
 pub const std_options = struct {
@@ -205,9 +207,12 @@ pub fn runAll(allocator: Allocator, simulation: *Simulation) !void {
 
 pub fn runInstance(main_allocator: Allocator, instance: *SimulationInstance) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{
-        .verbose_log = true,
+        .verbose_log = verbose_allocation_log,
     }){};
-    defer _ = gpa.deinit();
+    defer {
+        if (builtin.mode != .Debug) _ = gpa.detectLeaks();
+        _ = gpa.deinit();
+    }
 
     var thread_allocator = gpa.allocator();
 

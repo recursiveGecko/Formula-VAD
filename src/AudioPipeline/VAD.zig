@@ -241,6 +241,7 @@ pub fn deinit(self: *Self) void {
     self.long_term_speech_volume.deinit();
     self.short_term_speech_volume.deinit();
     self.audio_vol_ratio.deinit();
+    self.allocator.free(self.temp_channel_volumes);
     self.vad_segments.deinit();
 }
 

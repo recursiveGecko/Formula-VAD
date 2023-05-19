@@ -35,7 +35,7 @@ pub fn init(allocator: Allocator, config: Config) !*Self {
     });
 
     // TODO: Calculate a more optional length?
-    self.buffer_length = config.buffer_length orelse config.sample_rate * 30;
+    self.buffer_length = config.buffer_length orelse config.sample_rate * 10;
 
     self.channel_pcm_buf = try allocator.alloc([]f32, config.n_channels);
     errdefer allocator.free(self.channel_pcm_buf.?);
