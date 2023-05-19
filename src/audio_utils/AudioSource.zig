@@ -12,7 +12,9 @@ pub const AudioSource = union(enum) {
             .stream => |*stream| {
                 stream.close();
             },
-            inline else => {},
+            .buffer => |*buffer| {
+                buffer.deinit();
+            },
         }
     }
 

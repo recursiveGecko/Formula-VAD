@@ -17,13 +17,17 @@ const Self = @This();
 
 allocator: std.mem.Allocator,
 denoise_state: ?*rnnoise.DenoiseState,
+input_buffer: []f32,
 
 pub fn init(allocator: std.mem.Allocator) !Self {
     var denoise_state = rnnoise.rnnoise_create(null);
 
+    var input_buffer = try allocator.alloc(f32, getFrameSize());
+
     return Self{
         .denoise_state = denoise_state,
         .allocator = allocator,
+        .input_buffer = input_buffer,
     };
 }
 
@@ -32,6 +36,7 @@ pub fn deinit(self: *Self) void {
         rnnoise.rnnoise_destroy(self.denoise_state.?);
         self.denoise_state = null;
     }
+    self.allocator.free(self.input_buffer);
 }
 
 /// Samples must be mono, *48kHz*, f32 values, normalized [-1, 1].
@@ -48,14 +53,11 @@ pub fn denoise(self: *Self, samples: SplitSlice(f32), result: []f32) !f32 {
         return error.InvalidResultSize;
     }
 
-    const rnnoise_input = try self.allocator.alloc(f32, samples.len());
-    defer self.allocator.free(rnnoise_input);
-
     // RNNoise expects an odd format, `s16` values represented as floats,
     // and we're working with normalized float PCM samples (`f32le` in `ffmpeg` terms)
-    normalizedPcmToRnnoise(samples, rnnoise_input);
+    normalizedPcmToRnnoise(samples, self.input_buffer);
 
-    const vad = rnnoise.rnnoise_process_frame(self.denoise_state.?, result.ptr, rnnoise_input.ptr);
+    const vad = rnnoise.rnnoise_process_frame(self.denoise_state.?, result.ptr, self.input_buffer.ptr);
 
     // Convert the output samples back to normalized float PCM
     rnnoiseToNormalizedPcm(result);

@@ -159,7 +159,7 @@ pub fn runPipeline(self: *Self) !void {
 }
 
 /// Slice samples using absolute indices, from `abs_from` inclusive to `abs_to` exclusive.
-pub fn sliceSegment(self: Self, abs_from: u64, abs_to: u64) !Segment {
+pub fn sliceSegment(self: Self, result_segment: *Segment, abs_from: u64, abs_to: u64) !void {
     // Valid slicing range
     const max_abs_idx = self.total_write_count;
     const min_abs_idx = if (max_abs_idx >= self.buffer_length) max_abs_idx - self.buffer_length else 0;
@@ -193,22 +193,18 @@ pub fn sliceSegment(self: Self, abs_from: u64, abs_to: u64) !Segment {
         first_to = rel_to;
     }
 
-    const channels = try self.allocator.alloc(SplitSlice(f32), self.config.n_channels);
-    errdefer self.allocator.free(channels);
+    var result_split_slice = result_segment.*.channel_pcm_buf;
+    const n_channels = self.config.n_channels;
 
-    for (0..channels.len) |channel_idx| {
-        channels[channel_idx] = SplitSlice(f32){
+    for (0..n_channels) |channel_idx| {
+        result_split_slice[channel_idx] = SplitSlice(f32){
             .first = self.channel_pcm_buf.?[channel_idx][first_from..first_to],
             .second = self.channel_pcm_buf.?[channel_idx][0..second_to],
         };
     }
 
-    return Segment{
-        .index = abs_from,
-        .length = abs_to - abs_from,
-        .allocator = self.allocator,
-        .channel_pcm_buf = channels,
-    };
+    result_segment.*.index = abs_from;
+    result_segment.*.length = abs_to - abs_from;
 }
 
 pub fn beginCapture(self: *Self, from_sample: usize) !void {
@@ -251,27 +247,27 @@ test "pushSamples() ring buffer handling" {
 
     var pcm = pipeline.channel_pcm_buf.?[0];
 
-    try pipeline.pushSamples(&.{&.{0, 1, 2}});
+    try pipeline.pushSamples(&.{&.{ 0, 1, 2 }});
     // write index:          v
     // expected:   [0, 1, 2, _, _]
     try expectEqualSlices(f32, &.{ 0, 1, 2 }, pcm[0..3]);
 
-    try pipeline.pushSamples(&.{&.{4, 5, 6, 7, 8, 9}});
+    try pipeline.pushSamples(&.{&.{ 4, 5, 6, 7, 8, 9 }});
     // write index:             v
     // expected:   [6, 7, 8, 9, 5]
     try expectEqualSlices(f32, &.{ 6, 7, 8, 9, 5 }, pcm);
 
-    try pipeline.pushSamples(&.{&.{2, 3, 4}});
+    try pipeline.pushSamples(&.{&.{ 2, 3, 4 }});
     // write index:       v
     // expected:   [3, 4, 8, 9, 2]
     try expectEqualSlices(f32, &.{ 3, 4, 8, 9, 2 }, pcm);
 
-    try pipeline.pushSamples(&.{&.{0, 0, 0, 0, 0, 50, 60, 70, 80, 90}});
+    try pipeline.pushSamples(&.{&.{ 0, 0, 0, 0, 0, 50, 60, 70, 80, 90 }});
     // write index:         v
     // expected:   [80, 90, 50, 60, 70]
     try expectEqualSlices(f32, &.{ 80, 90, 50, 60, 70 }, pcm);
 
-    try pipeline.pushSamples(&.{&.{-1, 0, 2, 0}});
+    try pipeline.pushSamples(&.{&.{ -1, 0, 2, 0 }});
     // write index:    v
     // expected:   [0, 90, -1, 0, 2]
     try expectEqualSlices(f32, &.{ 0, 90, -1, 0, 2 }, pcm);

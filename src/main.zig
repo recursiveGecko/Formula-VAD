@@ -26,4 +26,5 @@ pub fn audioTest(allocator: Allocator) !void {
 test {
     _ = @import("./AudioPipeline.zig");
     _ = @import("./structures/FixedCapacityDeque.zig");
+    _ = @import("./structures/DirtyMemPool.zig");
 }

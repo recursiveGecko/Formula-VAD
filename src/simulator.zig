@@ -22,7 +22,7 @@ const seconds_per_hour = 3600;
 // Number of audio samples to read at a time when streaming audio
 const audio_read_frame_size = 48000;
 // Whether to preload audio into memory or stream it
-const preload_audio = true;
+const preload_audio = false;
 
 /// stdlib option overrides
 pub const std_options = struct {
@@ -205,7 +205,7 @@ pub fn runAll(allocator: Allocator, simulation: *Simulation) !void {
 
 pub fn runInstance(main_allocator: Allocator, instance: *SimulationInstance) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{
-        // .verbose_log = true,
+        .verbose_log = true,
     }){};
     defer _ = gpa.deinit();
 
@@ -226,11 +226,11 @@ pub fn simulateVAD(allocator: Allocator, audio: *AudioSource) ![]VAD.VADSegment 
         .sample_rate = audio.sampleRate(),
         .n_channels = audio.nChannels(),
         .vad_config = .{},
+        // .skip_processing = true,
     });
     defer pipeline.deinit();
 
     // const sample_rate = audio.sampleRate();
-    var total_samples_read: usize = 0;
 
     if (audio.* == .stream) {
         var stream = audio.stream;
@@ -262,7 +262,6 @@ pub fn simulateVAD(allocator: Allocator, audio: *AudioSource) ![]VAD.VADSegment 
             }
 
             try pipeline.pushSamples(trimmed_channel_pcm);
-            total_samples_read += samples_read;
         }
     } else if (audio.* == .buffer) {
         var audio_buffer = audio.buffer;
@@ -270,8 +269,6 @@ pub fn simulateVAD(allocator: Allocator, audio: *AudioSource) ![]VAD.VADSegment 
     } else {
         unreachable;
     }
-
-    log.info("Processed: {d} samples", .{total_samples_read});
 
     const vad_segments = try pipeline.vad.?.vad_segments.toOwnedSlice();
     errdefer allocator.free(vad_segments);

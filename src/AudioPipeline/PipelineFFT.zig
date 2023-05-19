@@ -85,17 +85,8 @@ pub fn deinit(self: *Self) void {
     self.fft_instance.deinit();
 }
 
-pub fn fft(self: *Self, segment: Segment) !Result {
+pub fn fft(self: *Self, segment: Segment, result: *Result) !void {
     const channels = segment.channel_pcm_buf;
-
-    var result = try Result.init(
-        self.allocator,
-        channels.len,
-        self.config.fft_size,
-        self.fft_instance.binCount(),
-    );
-    errdefer result.deinit();
-
 
     for (0..channels.len) |channel_idx| {
         const samples = channels[channel_idx];
@@ -103,8 +94,6 @@ pub fn fft(self: *Self, segment: Segment) !Result {
     }
     
     result.index = segment.index;
-
-    return result;
 }
 
 pub fn averageVolumeInBand(self: Self, result: Result, min_freq: f32, max_freq: f32, channel_results: []f32) !void {
