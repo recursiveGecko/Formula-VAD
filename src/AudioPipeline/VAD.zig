@@ -11,7 +11,6 @@ const SplitSlice = @import("../structures/SplitSlice.zig").SplitSlice;
 const Segment = @import("./Segment.zig");
 const SegmentWriter = @import("./SegmentWriter.zig");
 const RollingAverage = @import("../structures/RollingAverage.zig");
-const DirtyMemPool = @import("../structures/DirtyMemPool.zig").DirtyMemPool;
 
 const Self = @This();
 
@@ -76,11 +75,9 @@ denoiser: Denoiser,
 /// Number of samples denoiser step has read from the pipeline
 denoiser_read_count: u64 = 0,
 /// Stores a temporary slice of the pipeline that is being denoised
-denoiser_input_segment: Segment,
-/// Queue containing denoised audio segments
-denoiser_result_queue: FixedCapacityDeque(*DenoiserResult),
-/// Pool of results
-denoiser_result_pool: DirtyMemPool(DenoiserResult, usize, DenoiserResult.init),
+temp_denoiser_input_segment: Segment,
+/// Stores the temporary result of the denoiser step
+temp_denoiser_result: DenoiserResult,
 /// Buffer between denoiser and FFT, forming segments that are
 /// `fft_size` samples long
 denoiser_fft_buffer: SegmentWriter,
@@ -91,7 +88,7 @@ fft_buffer_rnn_vad: f32 = 0,
 /// channels of audio data at once (operating on Segments)
 pipeline_fft: PipelineFFT,
 /// Temporarily stores the FFT result
-pipeline_fft_result: PipelineFFT.Result,
+temp_pipeline_fft_result: PipelineFFT.Result,
 // Speech state machine
 speech_state: SpeechState = .closed,
 long_term_speech_volume: RollingAverage,
@@ -126,24 +123,16 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     var denoiser = try Denoiser.init(allocator);
     errdefer denoiser.deinit();
 
-    var denoiser_input_segment = Segment{
+    var temp_denoiser_input_segment = Segment{
         .channel_pcm_buf = try allocator.alloc(SplitSlice(f32), n_channels),
         .allocator = allocator,
         .index = undefined,
         .length = undefined,
     };
-    errdefer denoiser_input_segment.deinit();
+    errdefer temp_denoiser_input_segment.deinit();
 
-    // TODO: Find optimal length?
-    var denoiser_res_queue = try FixedCapacityDeque(*DenoiserResult).init(allocator, 100);
-    errdefer denoiser_res_queue.deinit();
-
-    var denoiser_result_pool = try DirtyMemPool(
-        DenoiserResult,
-        usize,
-        DenoiserResult.init,
-    ).init(allocator, n_channels);
-    errdefer denoiser_result_pool.deinit();
+    var temp_denoiser_result = try DenoiserResult.init(allocator, n_channels);
+    errdefer temp_denoiser_result.deinit();
 
     var denoiser_fft_buffer = try SegmentWriter.init(allocator, n_channels, config.fft_size);
     // Pipeline sample number that corresponds to the start of the FFT buffer
@@ -158,13 +147,13 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     });
     errdefer pipeline_fft.deinit();
 
-    var pipeline_fft_result = try PipelineFFT.Result.init(
+    var temp_pipeline_fft_result = try PipelineFFT.Result.init(
         allocator,
         n_channels,
         config.fft_size,
         pipeline_fft.fft_instance.binCount(),
     );
-    errdefer pipeline_fft_result.deinit();
+    errdefer temp_pipeline_fft_result.deinit();
 
     const eval_per_sec = sample_rate / config.fft_size;
     const long_term_avg_len = @floatToInt(
@@ -209,12 +198,11 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
         .config = config,
         .n_channels = n_channels,
         .denoiser = denoiser,
-        .denoiser_input_segment = denoiser_input_segment,
-        .denoiser_result_queue = denoiser_res_queue,
-        .denoiser_result_pool = denoiser_result_pool,
+        .temp_denoiser_input_segment = temp_denoiser_input_segment,
+        .temp_denoiser_result = temp_denoiser_result,
         .denoiser_fft_buffer = denoiser_fft_buffer,
         .pipeline_fft = pipeline_fft,
-        .pipeline_fft_result = pipeline_fft_result,
+        .temp_pipeline_fft_result = temp_pipeline_fft_result,
         .long_term_speech_volume = long_term_speech_avg,
         .short_term_speech_volume = short_term_speech_avg,
         .audio_vol_ratio = audio_vol_ratio,
@@ -226,17 +214,12 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
 }
 
 pub fn deinit(self: *Self) void {
-    while (self.denoiser_result_queue.length() > 0) {
-        var r = self.denoiser_result_queue.popFront() catch unreachable;
-        r.deinit();
-    }
-    self.denoiser_input_segment.deinit();
     self.denoiser.deinit();
-    self.denoiser_result_queue.deinit();
-    self.denoiser_result_pool.deinit();
+    self.temp_denoiser_input_segment.deinit();
+    self.temp_denoiser_result.deinit();
     self.denoiser_fft_buffer.deinit();
     self.pipeline_fft.deinit();
-    self.pipeline_fft_result.deinit();
+    self.temp_pipeline_fft_result.deinit();
 
     self.long_term_speech_volume.deinit();
     self.short_term_speech_volume.deinit();
@@ -246,33 +229,23 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn run(self: *Self) !void {
-    var keep_running: bool = true;
-
-    // Keep running as long as there is data to process
-    while (keep_running) {
-        const s1 = try self.denoiserStep();
-        const s2 = try self.denoiserFftBufferStep();
-
-        keep_running = s1 or s2;
-    }
+    try self.denoiserStep();
 }
 
 /// Returns true if any processing was done
-fn denoiserStep(self: *Self) !bool {
+fn denoiserStep(self: *Self) !void {
     const frame_size = Denoiser.getFrameSize();
     const p = self.pipeline;
 
     // While there are enough input samples to form a RNNoise frame
     while (p.total_write_count - self.denoiser_read_count >= frame_size) {
-        if (self.denoiser_result_queue.remainingCapacity() == 0) return true;
-
         const from = self.denoiser_read_count;
         const to = from + frame_size;
 
-        try self.pipeline.sliceSegment(&self.denoiser_input_segment, from, to);
-        var input_segment: *Segment = &self.denoiser_input_segment;
+        var input_segment: *Segment = &self.temp_denoiser_input_segment;
+        try self.pipeline.sliceSegment(input_segment, from, to);
 
-        var denoiser_result: *DenoiserResult = try self.denoiser_result_pool.acquire();
+        var denoiser_result: *DenoiserResult = &self.temp_denoiser_result;
         var denoised_segment: *Segment = &denoiser_result.segment;
 
         // We will use the lowest RNNoise VAD of all channels
@@ -291,58 +264,52 @@ fn denoiserStep(self: *Self) !bool {
         denoiser_result.length = frame_size;
         denoiser_result.vad = vad_low;
 
-        try self.denoiser_result_queue.pushBack(denoiser_result);
         self.denoiser_read_count = to;
-    }
 
-    return false;
+        _ = try self.denoiserFftBufferStep(denoiser_result);
+    }
 }
 
-fn denoiserFftBufferStep(self: *Self) !bool {
+fn denoiserFftBufferStep(self: *Self, denoiser_result: *const DenoiserResult) !bool {
     var fft_buffer = &self.denoiser_fft_buffer;
     const fft_buffer_len = fft_buffer.segment.length;
 
-    while (self.denoiser_result_queue.length() > 0) {
-        var denoiser_result: *DenoiserResult = try self.denoiser_result_queue.popFront();
-        defer self.denoiser_result_pool.release(denoiser_result);
+    const denoised_segment: *const Segment = &denoiser_result.segment;
 
-        // Denoiser segment could be larger than the FFT buffer (depending on FFT size)
-        // So we might have to split it into multiple FFT buffer writes
-        const denoised_segment: *const Segment = &denoiser_result.segment;
-        var denoised_buf_offset: usize = 0;
+    // Denoiser segment could be larger than the FFT buffer (depending on FFT size)
+    // So we might have to split it into multiple FFT buffer writes
+    var denoised_buf_offset: usize = 0;
+    while (true) {
+        const written = try fft_buffer.write(denoised_segment.*, denoised_buf_offset);
+        denoised_buf_offset += written;
+        std.debug.assert(denoised_buf_offset <= denoised_segment.length);
 
-        while (true) {
-            const written = try fft_buffer.write(denoised_segment.*, denoised_buf_offset);
-            denoised_buf_offset += written;
-            std.debug.assert(denoised_buf_offset <= denoised_segment.length);
+        const fft_buffer_is_full = fft_buffer.write_index == fft_buffer_len;
 
-            const fft_buffer_is_full = fft_buffer.write_index == fft_buffer_len;
+        // Keep track of the average RNNoise VAD value for the samples
+        // going into the FFT buffer
+        const current_segment_share = @intToFloat(f32, written) / @intToFloat(f32, fft_buffer_len);
+        self.fft_buffer_rnn_vad += denoiser_result.vad * current_segment_share;
 
-            // Keep track of the average RNNoise VAD value for the samples
-            // going into the FFT buffer
-            const current_segment_share = @intToFloat(f32, written) / @intToFloat(f32, fft_buffer_len);
-            self.fft_buffer_rnn_vad += denoiser_result.vad * current_segment_share;
+        if (fft_buffer_is_full) {
+            var fft_input = DenoiserResult{
+                .index = fft_buffer.segment.index,
+                .length = fft_buffer.segment.length,
+                .segment = fft_buffer.segment,
+                .vad = self.fft_buffer_rnn_vad,
+            };
 
-            if (fft_buffer_is_full) {
-                var fft_input = DenoiserResult{
-                    .index = fft_buffer.segment.index,
-                    .length = fft_buffer.segment.length,
-                    .segment = fft_buffer.segment,
-                    .vad = self.fft_buffer_rnn_vad,
-                };
+            try self.fftStep(&fft_input);
 
-                try self.fftStep(&fft_input);
+            // Global index of the first sample in the next segment
+            const next_fft_buffer_index = denoised_segment.index + denoised_buf_offset;
+            fft_buffer.reset(next_fft_buffer_index);
+            self.fft_buffer_rnn_vad = 0;
+        }
 
-                // Global index of the first sample in the next segment
-                const next_fft_buffer_index = denoised_segment.index + denoised_buf_offset;
-                fft_buffer.reset(next_fft_buffer_index);
-                self.fft_buffer_rnn_vad = 0;
-            }
-
-            // We have written the entirety of the source segment
-            if (denoised_buf_offset == denoised_segment.length) {
-                break;
-            }
+        // We have written the entirety of the source segment
+        if (denoised_buf_offset == denoised_segment.length) {
+            break;
         }
     }
 
@@ -350,8 +317,8 @@ fn denoiserFftBufferStep(self: *Self) !bool {
 }
 
 fn fftStep(self: *Self, fft_input: *DenoiserResult) !void {
-    try self.pipeline_fft.fft(fft_input.segment, &self.pipeline_fft_result);
-    try self.speechStep(&self.pipeline_fft_result, fft_input.vad);
+    try self.pipeline_fft.fft(fft_input.segment, &self.temp_pipeline_fft_result);
+    try self.speechStep(&self.temp_pipeline_fft_result, fft_input.vad);
 }
 
 fn speechStep(self: *Self, result: *PipelineFFT.Result, rnn_vad: f32) !void {
