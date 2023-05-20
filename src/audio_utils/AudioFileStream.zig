@@ -13,44 +13,47 @@ sf_file: ?*sndfile.SNDFILE,
 n_channels: usize,
 sample_rate: usize,
 length: usize,
+interleaved_buffer: []f32,
 
 pub fn open(allocator: Allocator, path: []const u8) !Self {
-    var self = Self{
-        .allocator = allocator,
-        .sf_info = std.mem.zeroInit(sndfile.SF_INFO, .{}),
-        .sf_file = null,
-        .n_channels = undefined,
-        .sample_rate = undefined,
-        .length = undefined,
-    };
-    errdefer self.close();
-
     const path_Z = try allocator.dupeZ(u8, path);
     defer allocator.free(path_Z);
 
-    self.sf_file = sndfile.sf_open(path_Z.ptr, sndfile.SFM_READ, &self.sf_info);
+    var sf_info = std.mem.zeroInit(sndfile.SF_INFO, .{});
+    var sf_file = sndfile.sf_open(path_Z.ptr, sndfile.SFM_READ, &sf_info);
+    errdefer _ = sndfile.sf_close(sf_file);
 
-    if (self.sf_file == null) {
+    if (sf_file == null) {
         return error.SndfileOpenError;
     }
 
-    self.n_channels = @intCast(usize, self.sf_info.channels);
-    self.sample_rate = @intCast(usize, self.sf_info.samplerate);
-    self.length = @intCast(usize, self.sf_info.frames);
+    const n_channels = @intCast(usize, sf_info.channels);
+    const sample_rate = @intCast(usize, sf_info.samplerate);
+    const length = @intCast(usize, sf_info.frames);
+
+    var interleaved_buffer = try allocator.alloc(f32, n_channels * sample_rate);
+    errdefer allocator.free(interleaved_buffer);
+
+    var self = Self{
+        .allocator = allocator,
+        .sf_info = sf_info,
+        .sf_file = sf_file,
+        .n_channels = n_channels,
+        .sample_rate = sample_rate,
+        .length = length,
+        .interleaved_buffer = interleaved_buffer,
+    };
 
     return self;
 }
 
-/// Reads a given maximum number of samples from the file and writes them into
+/// Reads a given maximum number of frames from the file and writes them into
 /// the given destination buffer, starting at the given offset.
-/// Returns the number of samples read.
+/// Returns the number of frames read.
 /// Returns an error if the destination is full, callers should close the stream
-/// when the number of samples read is less than the number of samples expected.
-/// The caller must provide a temporary buffer that samples will be read into
-/// before they are deinterleaved into the destination buffer. Buffer must be
-/// `max_samples` * `n_channels` in length.
+/// when the number of frames read is less than the number of frames expected.
 ///
-pub fn read(self: *Self, interleaved_buffer: []f32, result_pcm: [][]f32, offset: usize, max_samples: usize) !usize {
+pub fn read(self: *Self, result_pcm: [][]f32, result_offset: usize, max_frames: usize) !usize {
     if (self.sf_file == null) {
         return error.FileNotOpen;
     }
@@ -58,28 +61,40 @@ pub fn read(self: *Self, interleaved_buffer: []f32, result_pcm: [][]f32, offset:
 
     assert(result_pcm.len == self.n_channels);
 
-    const rem_result_size = result_pcm[0].len - offset;
-    const n_samples = @min(max_samples, rem_result_size);
-    const read_chunk_size = self.n_channels * n_samples;
+    const rem_result_size = result_pcm[0].len - result_offset;
+    const total_frames_to_read = @min(max_frames, rem_result_size);
 
     if (rem_result_size == 0) {
         return error.DestinationBufferFull;
     }
 
-    // Read samples into the interleaved buffer
-    const c_samples_read = sndfile.sf_read_float(sf_file, interleaved_buffer.ptr, @intCast(i64, read_chunk_size));
-    const samples_read = @intCast(usize, c_samples_read);
+    const max_frames_per_step = self.interleaved_buffer.len / self.n_channels;
 
-    // Organize samples into separated channel buffers
-    var sample_index: isize = @intCast(isize, offset) - 1;
-    for (0..samples_read) |i| {
-        const channel_idx = i % self.n_channels;
-        if (channel_idx == 0) sample_index += 1;
+    var total_read_count: usize = 0;
+    while (true) {
+        const frames_to_read = @min(max_frames_per_step, total_frames_to_read - total_read_count);
+        
+        // Read samples into the interleaved buffer
+        const c_frames_read = sndfile.sf_readf_float(sf_file, self.interleaved_buffer.ptr, @intCast(i64, frames_to_read));
+        const frames_read = @intCast(usize, c_frames_read);
 
-        result_pcm[channel_idx][@intCast(usize, sample_index)] = interleaved_buffer[i];
+        // Organize samples into separated channel buffers
+        const base_write_offset = result_offset + total_read_count;
+
+        for (0..frames_read) |frame_idx| {
+            const write_idx = base_write_offset + frame_idx;
+
+            for (0..self.n_channels) |channel_idx| {
+                const read_idx = frame_idx * self.n_channels + channel_idx;
+                result_pcm[channel_idx][write_idx] = self.interleaved_buffer[read_idx];
+            }
+        }
+
+        if (frames_read == 0) break;
+        total_read_count += frames_read;
     }
 
-    return samples_read / self.n_channels;
+    return total_read_count;
 }
 
 pub fn seekToSample(self: *Self, sample: usize) !void {
@@ -102,6 +117,8 @@ pub fn close(self: *Self) void {
         _ = sndfile.sf_close(sf_file);
         self.sf_file = null;
     }
+
+    self.allocator.free(self.interleaved_buffer);
 }
 
 pub fn durationSeconds(self: Self) f32 {

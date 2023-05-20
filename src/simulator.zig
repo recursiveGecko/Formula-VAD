@@ -21,7 +21,7 @@ const megabyte = 1024 * 1024;
 const seconds_per_hour = 3600;
 
 // Number of audio samples to read at a time when streaming audio
-const audio_read_frame_size = 48000 * 10;
+const audio_read_frame_count = 48000 * 10;
 // Whether to preload audio into memory or stream it
 const preload_audio = false;
 const verbose_allocation_log = false;
@@ -239,11 +239,8 @@ pub fn simulateVAD(allocator: Allocator, audio: *AudioSource) ![]VAD.VADSegment 
 
     if (audio.* == .stream) {
         var stream = audio.stream;
-        const frame_size = audio_read_frame_size;
+        const frame_count = audio_read_frame_count;
 
-        // Buffer where interleaved samples are temporarily stored
-        var interleaved_buffer = try allocator.alloc(f32, frame_size * stream.n_channels);
-        defer allocator.free(interleaved_buffer);
         // The backing slice of slices for our audio samples
         var backing_channel_pcm = try allocator.alloc([]f32, audio.nChannels());
         // The slice we'll pass to the audio pipeline, trimmed to the actual number of samples read.
@@ -256,17 +253,17 @@ pub fn simulateVAD(allocator: Allocator, audio: *AudioSource) ![]VAD.VADSegment 
         }
         // Initialize the backing channel slices
         for (0..backing_channel_pcm.len) |i| {
-            backing_channel_pcm[i] = try allocator.alloc(f32, frame_size);
+            backing_channel_pcm[i] = try allocator.alloc(f32, frame_count);
             channels_allocated += 1;
         }
 
         // Read frames and pass them to the AudioPipeline
         while (true) {
-            const samples_read = try stream.read(interleaved_buffer, backing_channel_pcm, 0, frame_size);
-            if (samples_read == 0) break;
+            const frames_read = try stream.read(backing_channel_pcm, 0, frame_count);
+            if (frames_read == 0) break;
 
             for (0..audio.nChannels()) |i| {
-                trimmed_channel_pcm[i] = backing_channel_pcm[i][0..samples_read];
+                trimmed_channel_pcm[i] = backing_channel_pcm[i][0..frames_read];
             }
 
             try pipeline.pushSamples(trimmed_channel_pcm);
