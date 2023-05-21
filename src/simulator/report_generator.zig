@@ -63,46 +63,49 @@ pub fn bufPrintSimulationReport(allocator: Allocator, simulation: Simulation) ![
     const agg = statistics.aggregate(all_stats);
 
     try writer.print("\n=> Aggregate stats \n\n", .{});
-    try writer.print("Total speech events    (P):  {d: >5}\n", .{agg.total_positives});
-    try writer.print("True positives        (TP):  {d: >5}\n", .{agg.true_positives});
-    try writer.print("False positives       (FP):  {d: >5}\n", .{agg.false_positives});
-    try writer.print("False negatives       (FN):  {d: >5}\n", .{agg.false_negatives});
+    try writer.print("Total speech events    (P): {d: >5}\n", .{agg.total_positives});
+    try writer.print("True positives        (TP): {d: >5}\n", .{agg.true_positives});
+    try writer.print("False positives       (FP): {d: >5}\n", .{agg.false_positives});
+    try writer.print("False negatives       (FN): {d: >5}", .{agg.false_negatives});
+    try writer.print("          Min.    Avg.    Max. \n", .{});
     try writer.print(
-        "True positive rate   (TPR):  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% /{d: >5.1}%  (Min/Max/Avg/Overall)\n",
+        "True positive rate   (TPR):   {d: >5.1}%  |  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% \n",
         .{
-            agg.true_positive_rate.min * 100,
-            agg.true_positive_rate.max * 100,
-            agg.true_positive_rate.avg * 100,
             agg.true_positive_rate.overall * 100,
+            agg.true_positive_rate.min * 100,
+            agg.true_positive_rate.avg * 100,
+            agg.true_positive_rate.max * 100,
         },
     );
     try writer.print(
-        "False negative rate  (FNR):  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% /{d: >5.1}%  (Min/Max/Avg/Overall)\n",
+        "False negative rate  (FNR):   {d: >5.1}%  |  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% \n",
         .{
-            agg.false_negative_rate.min * 100,
-            agg.false_negative_rate.max * 100,
-            agg.false_negative_rate.avg * 100,
             agg.false_negative_rate.overall * 100,
+            agg.false_negative_rate.min * 100,
+            agg.false_negative_rate.avg * 100,
+            agg.false_negative_rate.max * 100,
         },
     );
     try writer.print(
-        "Precision            (PPV):  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% /{d: >5.1}%  (Min/Max/Avg/Overall)\n",
+        "Precision            (PPV):   {d: >5.1}%  |  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% \n",
         .{
-            agg.precision.min * 100,
-            agg.precision.max * 100,
-            agg.precision.avg * 100,
             agg.precision.overall * 100,
+            agg.precision.min * 100,
+            agg.precision.avg * 100,
+            agg.precision.max * 100,
         },
     );
     try writer.print(
-        "False discovery rate (FDR):  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% /{d: >5.1}%  (Min/Max/Avg/Overall)\n",
+        "False discovery rate (FDR):   {d: >5.1}%  |  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% \n",
         .{
-            agg.false_discovery_rate.min * 100,
-            agg.false_discovery_rate.max * 100,
-            agg.false_discovery_rate.avg * 100,
             agg.false_discovery_rate.overall * 100,
+            agg.false_discovery_rate.min * 100,
+            agg.false_discovery_rate.avg * 100,
+            agg.false_discovery_rate.max * 100,
         },
     );
+    try writer.print("F-Score (β = {d: >5.2})       :   {d: >5.1}% \n", .{agg.f_score_beta, agg.f_score * 100});
+    try writer.print("Fowlkes-Mallows index     :   {d: >5.1}% \n", .{agg.fm_index * 100});
 
     return array_buf.toOwnedSlice();
 }

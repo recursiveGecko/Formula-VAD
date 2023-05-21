@@ -1,3 +1,6 @@
+const std = @import("std");
+const math = std.math;
+const pow = std.math.pow;
 const Evaluator = @import("../Evaluator.zig");
 
 pub const SingleStats = struct {
@@ -48,11 +51,18 @@ pub const AggregateStats = struct {
     /// FDR (false discovery rate) = FP / (FP + TP)
     /// Given a positive result, the probability that it is false
     false_discovery_rate: AggStat = .{ .min = 2, .max = -2, .avg = undefined, .overall = undefined },
-    /// PPV (positive predictive value) = TP / (TP + FP)
+    /// PPV (positive predictive value, precision) = TP / (TP + FP)
     /// Given a positive result, the probability that it is true
     precision: AggStat = .{ .min = 2, .max = -2, .avg = undefined, .overall = undefined },
+    /// Fowlkes–Mallows index (single accuracy measure) FM = sqrt(TPR * PPV)
+    /// https://en.wikipedia.org/wiki/Fowlkes%E2%80%93Mallows_index
+    fm_index: f32 = undefined,
+    /// F-score (single accuracy measure) F_beta = (1 + beta^2) * (PPV * TPR) / (beta^2 * PPV + TPR)
+    /// https://en.wikipedia.org/wiki/F-score
+    f_score: f32 = undefined,
+    /// `beta` is chosen such that recall is considered `beta` times as important as precision
+    f_score_beta: f32 = undefined,
 };
-
 
 pub fn fromEvaluator(eval: Evaluator) SingleStats {
     var stats = SingleStats{
@@ -85,7 +95,6 @@ pub fn fromEvaluator(eval: Evaluator) SingleStats {
 
     return stats;
 }
-
 
 pub fn aggregate(stats: []SingleStats) AggregateStats {
     var agg = AggregateStats{};
@@ -142,6 +151,14 @@ pub fn aggregate(stats: []SingleStats) AggregateStats {
     agg.false_negative_rate.avg = sum_false_negative_rate / n_stats_f;
     agg.false_discovery_rate.avg = sum_false_discovery_rate / n_stats_f;
     agg.precision.avg = sum_precision / n_stats_f;
+
+    // F_beta = (1 + beta^2) * (PPV * TPR) / (beta^2 * PPV + TPR)
+    agg.f_score_beta = 0.7;
+    agg.f_score = (1 + pow(f32, agg.f_score_beta, 2)) * (agg.precision.overall * agg.true_positive_rate.overall) /
+        (pow(f32, agg.f_score_beta, 2) * agg.precision.overall + agg.true_positive_rate.overall);
+
+    // Fowlkes–Mallows index = sqrt(TPR * PPV)
+    agg.fm_index = math.sqrt(agg.true_positive_rate.overall * agg.precision.overall);
 
     return agg;
 }
