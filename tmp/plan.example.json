@@ -3,7 +3,7 @@
     {
       "name": "Sainz",
       "audio_path": "1000006698_55_Carlos_Sainz.ogg",
-      "ref_path": "1000006698_27_Nico_Hulkenberg.txt"
+      "ref_path": "1000006698_55_Carlos_Sainz.txt"
     },
     {
       "name": "Hulkenberg",
@@ -11,5 +11,10 @@
       "ref_path": "1000006698_27_Nico_Hulkenberg.txt"
     }
   ],
-  "vad_config": {}
+  "config": {
+    "vad_config": {},
+    "output_dir": "sim-out",
+    "preload_audio": false,
+    "audio_read_frame_count": 48000
+  }
 }

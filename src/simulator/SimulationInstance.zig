@@ -28,18 +28,17 @@ main_thread_allocator: Allocator,
 
 pub fn init(
     allocator: Allocator,
-    json_path: []const u8,
+    base_path: []const u8,
     instance_json: SimulationInstanceJSON,
     sim_config: DynamicSimConfig,
 ) !Self {
     const name = try allocator.dupeZ(u8, instance_json.name);
     errdefer allocator.free(name);
 
-    const json_base_path = fs.path.dirname(json_path) orelse ".";
-    const audio_path = try fs.path.resolve(allocator, &.{ json_base_path, instance_json.audio_path });
+    const audio_path = try fs.path.resolve(allocator, &.{ base_path, instance_json.audio_path });
     defer allocator.free(audio_path);
 
-    const ref_path = try fs.path.resolve(allocator, &.{ json_base_path, instance_json.ref_path });
+    const ref_path = try fs.path.resolve(allocator, &.{ base_path, instance_json.ref_path });
     defer allocator.free(ref_path);
 
     var audio_source = try allocator.create(AudioSource);

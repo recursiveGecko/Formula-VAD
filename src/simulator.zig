@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
-
 const VAD = @import("AudioPipeline/VAD.zig");
 const clap = @import("clap");
 const Evaluator = @import("Evaluator.zig");
@@ -50,9 +49,12 @@ pub const Simulation = struct {
     instances: []SimulationInstance,
     config: DynamicSimConfig = .{},
     original_json: SimulationJSON,
+    base_path: []const u8,
+    resolved_out_path: ?[]const u8,
 
     pub fn deinit(self: *@This()) void {
         std.json.parseFree(SimulationJSON, self.allocator, self.original_json);
+        if (self.resolved_out_path) |path| self.allocator.free(path);
     }
 };
 
@@ -112,6 +114,10 @@ pub fn main() !void {
     defer simulation.deinit();
 
     try runAll(allocator, simulation);
+
+    // Generate output and report
+    _ = try maybeSaveOutput(allocator, simulation);
+
     const report = try report_generator.bufPrintSimulationReport(allocator, simulation.*);
     defer allocator.free(report);
     try stdout_w.writeAll(report);
@@ -119,8 +125,9 @@ pub fn main() !void {
 
 pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
     const plan_contents = try fs.Dir.readFileAlloc(fs.cwd(), allocator, json_path, 10 * megabyte);
-    errdefer allocator.free(plan_contents);
+    defer allocator.free(plan_contents);
 
+    const base_path = fs.path.dirname(json_path) orelse ".";
     const plan_json: SimulationJSON = try std.json.parseFromSlice(SimulationJSON, allocator, plan_contents, .{
         .ignore_unknown_fields = true,
     });
@@ -133,17 +140,39 @@ pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
     }
 
     for (plan_json.instances, 0..) |instance_json, i| {
-        instances[i] = try SimulationInstance.init(allocator, json_path, instance_json, plan_json.config);
+        instances[i] = try SimulationInstance.init(allocator, base_path, instance_json, plan_json.config);
         instances_alloc += 1;
     }
 
     var simulation = try allocator.create(Simulation);
     errdefer allocator.destroy(simulation);
 
+    var resolved_out_path: ?[]const u8 = val: {
+        if (plan_json.config.output_dir) |out_dir| {
+            const subdir_name = try std.fmt.allocPrint(allocator, "{d}", .{std.time.timestamp()});
+            const subdir_path = try fs.path.resolve(allocator, &.{ base_path, out_dir, subdir_name });
+            defer allocator.free(subdir_name);
+
+            try fs.Dir.makePath(fs.cwd(), subdir_path);
+            break :val subdir_path;
+        } else {
+            break :val null;
+        }
+    };
+    errdefer if (resolved_out_path) |path| allocator.free(path);
+
+    if (resolved_out_path) |out_dir| {
+        const json_copy_path = try fs.path.join(allocator, &.{ out_dir, "plan.json" });
+        defer allocator.free(json_copy_path);
+        try fs.Dir.writeFile(fs.cwd(), json_copy_path, plan_contents);
+    }
+
     simulation.* = Simulation{
         .instances = instances,
         .config = plan_json.config,
         .original_json = plan_json,
+        .base_path = base_path,
+        .resolved_out_path = resolved_out_path,
         .allocator = allocator,
     };
 
@@ -161,4 +190,32 @@ pub fn runAll(allocator: Allocator, simulation: *Simulation) !void {
     for (threads) |thread| {
         thread.join();
     }
+}
+
+pub fn maybeSaveOutput(allocator: Allocator, simulation: *const Simulation) !bool {
+    if (simulation.resolved_out_path == null) return false;
+    const out_dir = simulation.resolved_out_path.?;
+
+    for (simulation.instances) |instance| {
+        if (instance.evaluator == null) {
+            log.warn("Not saving output of instance {s} because it doesn't contain a result\n", .{instance.name});
+        }
+
+        const audacity_filename = try std.fmt.allocPrint(allocator, "{s}-audacity.txt", .{instance.name});
+        defer allocator.free(audacity_filename);
+        const audacity_path = try fs.path.join(allocator, &.{ out_dir, audacity_filename });
+        defer allocator.free(audacity_path);
+
+        const audacity_txt = try Evaluator.formats.serializeEvaluatorToAudacityTxt(allocator, instance.evaluator.?);
+        defer allocator.free(audacity_txt);
+
+        fs.Dir.writeFile(fs.cwd(), audacity_path, audacity_txt) catch |err| {
+            log.err("Failed to write Audacity txt: {any}", .{err});
+            return false;
+        };
+
+        log.info("{s}: Wrote Audacity txt to {s}", .{instance.name, audacity_path});
+    }
+
+    return true;
 }
