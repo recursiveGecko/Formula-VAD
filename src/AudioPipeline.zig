@@ -22,7 +22,7 @@ raw_pcm_buf: ?[]f32 = null,
 channel_pcm_buf: ?[][]f32 = null,
 buffer_length: usize,
 total_write_count: u64 = 0,
-vad: ?VAD = null,
+vad: VAD = undefined,
 
 pub fn init(allocator: Allocator, config: Config) !*Self {
     var self = try allocator.create(Self);
@@ -59,10 +59,7 @@ pub fn init(allocator: Allocator, config: Config) !*Self {
 }
 
 pub fn deinit(self: *Self) void {
-    if (self.vad) |*vad| {
-        vad.deinit();
-        self.vad = null;
-    }
+    self.vad.deinit();
 
     if (self.channel_pcm_buf) |buf| {
         self.allocator.free(buf);
@@ -75,10 +72,6 @@ pub fn deinit(self: *Self) void {
     }
 
     self.allocator.destroy(self);
-}
-
-pub fn processedCount(self: Self) usize {
-    return self.vad.?.fully_processed_count;
 }
 
 pub fn pushSamples(self: *Self, channel_pcm: []const []const f32) !void {
@@ -155,7 +148,7 @@ pub fn pushSamples(self: *Self, channel_pcm: []const []const f32) !void {
 pub fn runPipeline(self: *Self) !void {
     if (self.config.skip_processing) return;
 
-    try self.vad.?.run();
+    try self.vad.run();
 }
 
 /// Slice samples using absolute indices, from `abs_from` inclusive to `abs_to` exclusive.

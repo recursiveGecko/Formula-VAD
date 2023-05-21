@@ -146,7 +146,7 @@ fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VAD.VA
         unreachable;
     }
 
-    const vad_segments = try pipeline.vad.?.vad_segments.toOwnedSlice();
+    const vad_segments = try pipeline.vad.vad_machine.vad_segments.toOwnedSlice();
     errdefer allocator.free(vad_segments);
 
     return vad_segments;
