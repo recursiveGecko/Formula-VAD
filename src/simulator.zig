@@ -119,7 +119,7 @@ pub fn main() !void {
     _ = try maybeSaveOutput(allocator, simulation);
 
     const stat_config = Evaluator.statistics.StatConfig{
-        .ignore_shorter_than_sec = simulation.config.vad_config.min_vad_duration_ms / 1000,
+        .ignore_shorter_than_sec = simulation.config.vad_config.min_vad_duration_sec,
     };
 
     const report = try report_generator.bufPrintSimulationReport(allocator, simulation.*, stat_config);

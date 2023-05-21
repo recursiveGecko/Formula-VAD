@@ -32,11 +32,11 @@ pub const Config = struct {
     channel_vol_ratio_avg_sec: f32 = 0.5,
     channel_vol_ratio_threshold: f32 = 0.5,
     /// Conditions need to be met for this many consecutive milliseconds before speech is triggered
-    min_consecutive_ms_to_open: f32 = 200,
+    min_consecutive_sec_to_open: f32 = 0.2,
     /// Maximum gap where speech is still considered to be ongoing
-    max_speech_gap_ms: f32 = 1000,
+    max_speech_gap_sec: f32 = 1,
     /// Minimum duration of speech segments
-    min_vad_duration_ms: f32 = 700,
+    min_vad_duration_sec: f32 = 0.7,
 };
 
 pub const VADSegment = struct {
@@ -373,9 +373,9 @@ fn speechStep(self: *Self, fft_input: DenoiserResult, result: *PipelineFFT.Resul
     }
 
     // Number of consecutive samples above the threshold before the VAD opens
-    const min_consecutive_to_open = @floatToInt(usize, sample_rate_f * config.min_consecutive_ms_to_open / 1000);
+    const min_consecutive_to_open = @floatToInt(usize, sample_rate_f * config.min_consecutive_sec_to_open);
     // Number of consecutive samples below the threshold before the VAD closes
-    const max_gap_samples = @floatToInt(usize, sample_rate_f * config.max_speech_gap_ms / 1000);
+    const max_gap_samples = @floatToInt(usize, sample_rate_f * config.max_speech_gap_sec);
 
     // Use the minimum for activation as it's likely the one containing less engine noise, and therefore more accurate
     const short_term = self.short_term_speech_volume.push(min_volume);
@@ -477,7 +477,7 @@ fn onSpeechEnd(self: *Self) !void {
     const config = self.config;
 
     const length_realtime = @intToFloat(f32, length_samples) / sample_rate_f;
-    const speech_duration_met = length_realtime * 1000 >= config.min_vad_duration_ms;
+    const speech_duration_met = length_realtime >= config.min_vad_duration_sec;
 
     const avg_rnn_vad = self.speech_rnn_vad / @intToFloat(f32, self.speech_rnn_vad_count);
     const avg_speech_vol_ratio = self.speech_vol_ratio / @intToFloat(f32, self.speech_vol_ratio_count);
