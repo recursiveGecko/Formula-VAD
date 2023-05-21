@@ -66,7 +66,14 @@ pub fn main() !void {
     var evaluator = try Self.initAndRun(allocator, input_segments, ref_segments);
     defer evaluator.deinit();
 
-    const stats = statistics.fromEvaluator(evaluator);
+    const stat_config = statistics.StatConfig{
+        // TODO: Make this configurable?
+        // it should match whatever the VAD algorithm uses by design
+        // for most accurate results
+        .ignore_shorter_than_sec = 0.7,
+    };
+
+    const stats = statistics.fromEvaluator(evaluator, stat_config);
     try stdout_w.print("\n=> Definitions: \n\n", .{});
     try stdout_w.writeAll(report_generator.definitions);
     try stdout_w.print("\n\n=> Report: \n\n", .{});

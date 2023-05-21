@@ -5,6 +5,7 @@ const Simulation = @import("../simulator.zig").Simulation;
 const statistics = @import("../Evaluator/statistics.zig");
 const SingleStats = statistics.SingleStats;
 const AggregateStats = statistics.AggregateStats;
+const StatConfig = statistics.StatConfig;
 
 pub const definitions =
     \\P   (Positives):                            Total number of real speech segments (from reference labels)
@@ -25,7 +26,11 @@ pub const table_separator_vals = .{ "", "", "", "", "", "", "", "", "" };
 
 pub const table_row_fmt = "| {s: >30} | {d: >3} | {d: >3} | {d: >3} | {d: >3} | {d: >5.1}% | {d: >5.1}% | {d: >5.1}% | {d: >7.1}% |\n";
 
-pub fn bufPrintSimulationReport(allocator: Allocator, simulation: Simulation) ![]const u8 {
+pub fn bufPrintSimulationReport(
+    allocator: Allocator,
+    simulation: Simulation,
+    stat_config: StatConfig,
+) ![]const u8 {
     var array_buf = ArrayList(u8).init(allocator);
     const writer = array_buf.writer();
 
@@ -40,7 +45,7 @@ pub fn bufPrintSimulationReport(allocator: Allocator, simulation: Simulation) ![
 
     for (simulation.instances) |instance| {
         if (instance.evaluator) |evaluator| {
-            const stats = statistics.fromEvaluator(evaluator);
+            const stats = statistics.fromEvaluator(evaluator, stat_config);
             try all_stats_list.append(stats);
 
             try writer.print(table_row_fmt, .{
@@ -104,7 +109,7 @@ pub fn bufPrintSimulationReport(allocator: Allocator, simulation: Simulation) ![
             agg.false_discovery_rate.max * 100,
         },
     );
-    try writer.print("F-Score (β = {d: >5.2})       :   {d: >5.1}% \n", .{agg.f_score_beta, agg.f_score * 100});
+    try writer.print("F-Score (β = {d: >5.2})       :   {d: >5.1}% \n", .{ agg.f_score_beta, agg.f_score * 100 });
     try writer.print("Fowlkes-Mallows index     :   {d: >5.1}% \n", .{agg.fm_index * 100});
 
     return array_buf.toOwnedSlice();

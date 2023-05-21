@@ -35,7 +35,7 @@ const StaticSimConfig = struct {
 pub const static_sim_config = StaticSimConfig{};
 
 pub const DynamicSimConfig = struct {
-    vad_config: ?VAD.Config = null,
+    vad_config: VAD.Config = .{},
     output_dir: ?[]const u8 = null,
 
     /// Whether to preload audio into memory or stream it
@@ -118,7 +118,11 @@ pub fn main() !void {
     // Generate output and report
     _ = try maybeSaveOutput(allocator, simulation);
 
-    const report = try report_generator.bufPrintSimulationReport(allocator, simulation.*);
+    const stat_config = Evaluator.statistics.StatConfig{
+        .ignore_shorter_than_sec = simulation.config.vad_config.min_vad_duration_ms / 1000,
+    };
+
+    const report = try report_generator.bufPrintSimulationReport(allocator, simulation.*, stat_config);
     defer allocator.free(report);
     try stdout_w.writeAll(report);
 }
@@ -214,7 +218,7 @@ pub fn maybeSaveOutput(allocator: Allocator, simulation: *const Simulation) !boo
             return false;
         };
 
-        log.info("{s}: Wrote Audacity txt to {s}", .{instance.name, audacity_path});
+        log.info("{s}: Wrote Audacity txt to {s}", .{ instance.name, audacity_path });
     }
 
     return true;

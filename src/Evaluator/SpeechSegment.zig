@@ -32,14 +32,11 @@ pub fn hasMatch(self: Self) bool {
 }
 
 pub fn toComment(self: Self, allocator: Allocator) ![]const u8 {
-    var prefix: []const u8 = undefined;
     if (self.hasMatch()) {
-        prefix = "";
+        return try std.fmt.allocPrint(allocator, "{s}", .{self.debug_info orelse ""});
     } else {
-        prefix = "!!";
+        return try std.fmt.allocPrint(allocator, "UNMATCHED {s}", .{self.debug_info orelse ""});
     }
-
-    return try std.fmt.allocPrint(allocator, "{s} {s}", .{ prefix, self.debug_info orelse "" });
 }
 
 pub fn findOverlapping(allocator: Allocator, target: Self, others: []Self) ![]*Self {

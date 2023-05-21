@@ -19,7 +19,6 @@ const Self = @This();
 
 name: []const u8,
 audio_source: *AudioSource,
-vad_config: VAD.Config,
 output_dir: []const u8,
 reference_segments: []const Evaluator.SpeechSegment,
 evaluator: ?Evaluator = null,
@@ -60,7 +59,6 @@ pub fn init(
         .output_dir = "",
         .audio_source = audio_source,
         .reference_segments = ref_segments,
-        .vad_config = .{},
         .evaluator = null,
         .main_thread_allocator = allocator,
         .sim_config = sim_config,
@@ -103,7 +101,7 @@ fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VAD.VA
     const pipeline = try AudioPipeline.init(allocator, .{
         .sample_rate = audio.sampleRate(),
         .n_channels = audio.nChannels(),
-        .vad_config = .{},
+        .vad_config = self.sim_config.vad_config,
         // .skip_processing = true,
     });
     defer pipeline.deinit();

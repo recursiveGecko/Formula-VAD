@@ -33,7 +33,7 @@ pub const Config = struct {
     channel_vol_ratio_threshold: f32 = 0.5,
     /// Conditions need to be met for this many consecutive milliseconds before speech is triggered
     min_consecutive_ms_to_open: f32 = 200,
-    /// Conditions need to be met for this many consecutive milliseconds before speech is closed
+    /// Maximum gap where speech is still considered to be ongoing
     max_speech_gap_ms: f32 = 1000,
     /// Minimum duration of speech segments
     min_vad_duration_ms: f32 = 700,
@@ -251,7 +251,6 @@ pub fn run(self: *Self) !void {
     try self.denoiserStep();
 }
 
-/// Returns true if any processing was done
 fn denoiserStep(self: *Self) !void {
     const frame_size = Denoiser.getFrameSize();
     const p = self.pipeline;
@@ -301,7 +300,7 @@ fn denoiserStep(self: *Self) !void {
     }
 }
 
-fn denoiserFftBufferStep(self: *Self, denoiser_result: *const DenoiserResult) !bool {
+fn denoiserFftBufferStep(self: *Self, denoiser_result: *const DenoiserResult) !void {
     var fft_buffer = &self.denoiser_fft_buffer;
     const fft_buffer_len = fft_buffer.segment.length;
 
@@ -346,8 +345,6 @@ fn denoiserFftBufferStep(self: *Self, denoiser_result: *const DenoiserResult) !b
             break;
         }
     }
-
-    return false;
 }
 
 fn fftStep(self: *Self, fft_input: *DenoiserResult) !void {

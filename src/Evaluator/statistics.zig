@@ -64,10 +64,13 @@ pub const AggregateStats = struct {
     f_score_beta: f32 = undefined,
 };
 
-pub fn fromEvaluator(eval: Evaluator) SingleStats {
-    var stats = SingleStats{
-        .total_positives = eval.reference_segments.len,
-    };
+pub const StatConfig = struct {
+    // Ignores false negatives shorter than this value
+    ignore_shorter_than_sec: f32 = 0.0,
+};
+
+pub fn fromEvaluator(eval: Evaluator, config: StatConfig) SingleStats {
+    var stats = SingleStats{};
 
     for (eval.input_segments) |segment| {
         if (!segment.hasMatch()) {
@@ -76,6 +79,9 @@ pub fn fromEvaluator(eval: Evaluator) SingleStats {
     }
 
     for (eval.reference_segments) |ref_segment| {
+        if (ref_segment.duration() < config.ignore_shorter_than_sec) continue;
+        stats.total_positives += 1;
+
         if (ref_segment.hasMatch()) {
             stats.true_positives += 1;
         } else {
