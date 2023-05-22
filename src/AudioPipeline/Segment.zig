@@ -50,7 +50,7 @@ pub fn initWithCapacity(allocator: Allocator, n_channels: usize, length: usize) 
     return self;
 }
 
-/// Creates a deep copy* of the Segment.
+/// Creates a *deep copy* of the Segment.
 /// SplitSlice shape is not copied exactly, instead both halves
 /// are merged into `.first` half of the slice.
 pub fn copy(self: *Self, allocator: Allocator) !Self {

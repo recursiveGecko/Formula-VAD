@@ -97,7 +97,7 @@ pub fn run(self: *Self) !void {
     try self.storeResult(vad_segments);
 }
 
-fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VAD.VADSegment {
+fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VAD.VADSpeechSegment {
     const pipeline = try AudioPipeline.init(allocator, .{
         .sample_rate = audio.sampleRate(),
         .n_channels = audio.nChannels(),
@@ -154,7 +154,7 @@ fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VAD.VA
 
 pub fn storeResult(
     self: *Self,
-    vad_segments: []VAD.VADSegment,
+    vad_segments: []VAD.VADSpeechSegment,
 ) !void {
     var speech_segments = try self.main_thread_allocator.alloc(Evaluator.SpeechSegment, vad_segments.len);
     errdefer self.main_thread_allocator.free(speech_segments);

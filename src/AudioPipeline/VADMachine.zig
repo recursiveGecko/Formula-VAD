@@ -60,7 +60,7 @@ temp_channel_volumes: []f32,
 speech_vol_ratio: f32 = 0,
 speech_vol_ratio_count: usize = 0,
 /// End result - VAD segments
-vad_segments: std.ArrayList(VAD.VADSegment),
+vad_segments: std.ArrayList(VAD.VADSpeechSegment),
 
 pub fn init(allocator: Allocator, config: Config, vad: VAD) !Self {
     const sample_rate = vad.sample_rate;
@@ -96,7 +96,7 @@ pub fn init(allocator: Allocator, config: Config, vad: VAD) !Self {
     const temp_channel_volumes = try allocator.alloc(f32, n_channels);
     errdefer allocator.free(temp_channel_volumes);
 
-    var vad_segments = try std.ArrayList(VAD.VADSegment).initCapacity(allocator, 100);
+    var vad_segments = try std.ArrayList(VAD.VADSpeechSegment).initCapacity(allocator, 100);
     errdefer vad_segments.deinit();
 
     var self = Self{
@@ -125,15 +125,15 @@ pub fn deinit(self: *Self) void {
 
 pub fn run(
     self: *Self,
-    fft_input: VAD.DenoiserResult,
-    fft_result: PipelineFFT.Result,
+    fft_input: *const VAD.AnalyzedSegment,
+    fft_result: *const PipelineFFT.Result,
 ) !VAD.VADMachineResult {
     const sample_rate_f = @intToFloat(f32, self.sample_rate);
     const config = self.config;
 
     // Find the average volume in the speech band
     try self.pipeline_fft.averageVolumeInBand(
-        fft_result,
+        fft_result.*,
         config.speech_min_freq,
         config.speech_max_freq,
         self.temp_channel_volumes,
@@ -232,17 +232,17 @@ pub fn run(
 /// Track RNNoise's own VAD score during speech segments
 fn trackSpeechStats(
     self: *Self,
-    fft_input: VAD.DenoiserResult,
+    fft_input: *const VAD.AnalyzedSegment,
     from_state: SpeechState,
     to_state: SpeechState,
 ) void {
     if (from_state == .closed and to_state == .opening) {
-        self.speech_rnn_vad = fft_input.vad;
+        self.speech_rnn_vad = fft_input.vad orelse 0;
         self.speech_rnn_vad_count = 1;
         self.speech_vol_ratio = fft_input.volume_ratio;
         self.speech_vol_ratio_count = 1;
     } else if (from_state == .opening or from_state == .open) {
-        self.speech_rnn_vad += fft_input.vad;
+        self.speech_rnn_vad += fft_input.vad orelse 0;
         self.speech_rnn_vad_count += 1;
         self.speech_vol_ratio += fft_input.volume_ratio;
         self.speech_vol_ratio_count += 1;
@@ -264,7 +264,7 @@ fn onSpeechEnd(self: *Self) !VAD.VADMachineResult {
     const avg_speech_vol_ratio = self.speech_vol_ratio / @intToFloat(f32, self.speech_vol_ratio_count);
 
     if (speech_duration_met) {
-        const segment = VAD.VADSegment{
+        const segment = VAD.VADSpeechSegment{
             .sample_from = sample_from,
             .sample_to = sample_to,
             .debug_rnn_vad = avg_rnn_vad,
