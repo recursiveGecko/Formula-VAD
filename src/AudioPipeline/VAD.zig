@@ -6,7 +6,6 @@ const PipelineFFT = @import("./PipelineFFT.zig");
 const window_fn = @import("../audio_utils/window_fn.zig");
 const AudioPipeline = @import("../AudioPipeline.zig");
 const Denoiser = @import("../Denoiser.zig");
-const FixedCapacityDeque = @import("../structures/FixedCapacityDeque.zig").FixedCapacityDeque;
 const SplitSlice = @import("../structures/SplitSlice.zig").SplitSlice;
 const Segment = @import("./Segment.zig");
 const SegmentWriter = @import("./SegmentWriter.zig");
@@ -203,9 +202,10 @@ fn pipelineReadSize(config: Config) usize {
 fn collectInputStep(self: *Self) !void {
     const frame_size = pipelineReadSize(self.config);
     const p = self.pipeline;
+    const p_total_write_count = p.multi_ring_buffer.total_write_count;
 
     // While there are enough input samples to form a RNNoise frame
-    while (p.total_write_count - self.pipeline_read_count >= frame_size) {
+    while (p_total_write_count - self.pipeline_read_count >= frame_size) {
         const from = self.pipeline_read_count;
         const to = from + frame_size;
         self.pipeline_read_count = to;
