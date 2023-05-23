@@ -184,7 +184,7 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
             }
 
             for (0..self.n_channels) |channel_idx| {
-                result_slices[channel_idx] = SplitSlice(f32){
+                result_slices[channel_idx] = SplitSlice(TData){
                     .first = self.channel_buffers[channel_idx][rel_from..first_to],
                     .second = self.channel_buffers[channel_idx][0..second_to],
                 };
