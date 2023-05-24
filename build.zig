@@ -62,7 +62,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     // try addZigGameDev(b, exe, common_options);
-    exe.addModule("clap", try getClapModule(b, common_options));
+    try addClap(b, exe, common_options);
     try addSndfile(b, exe, common_options);
     try addKissFFT(b, exe, common_options);
     try addRnnoise(b, exe, common_options);
@@ -105,7 +105,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    evaluator_exe.addModule("clap", try getClapModule(b, common_options));
+    try addClap(b, evaluator_exe, common_options);
     b.installArtifact(evaluator_exe);
 
     const evaluator_run_cmd = b.addRunArtifact(evaluator_exe);
@@ -125,7 +125,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    simulator_exe.addModule("clap", try getClapModule(b, common_options));
+    try addClap(b, simulator_exe, common_options);
     try addSndfile(b, simulator_exe, common_options);
     try addKissFFT(b, simulator_exe, common_options);
     try addRnnoise(b, simulator_exe, common_options);
@@ -213,7 +213,7 @@ fn addSndfile(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOption
 }
 
 var clap_module: ?*std.Build.Module = null;
-fn getClapModule(b: *std.Build, options: CommonOptions) !*std.Build.Module {
+fn addClap(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
     _ = options;
     if (clap_module == null) {
         clap_module = b.createModule(.{
@@ -221,7 +221,7 @@ fn getClapModule(b: *std.Build, options: CommonOptions) !*std.Build.Module {
         });
     }
 
-    return clap_module.?;
+    exe.addModule("clap", clap_module.?);
 }
 
 fn prefixedPaths(allocator: std.mem.Allocator, prefix: []const u8, paths: []const []const u8) ![][]const u8 {
