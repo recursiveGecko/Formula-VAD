@@ -49,14 +49,7 @@ pub fn endIndex(self: Self) u64 {
 }
 
 pub fn start(self: *Self, start_index: u64) void {
-    // Add a couple of seconds of buffer to the start of the recording to avoid missing the start
-    const start_buffer = self.sample_rate * 2;
-    var actual_start_sample = if (start_buffer > start_index) 0 else start_index - start_buffer;
-
-    // But don't go further back than the end of the last recording to avoid double recording
-    actual_start_sample = @max(actual_start_sample, self.last_recording_end_index);
-
-    self.segment_writer.segment.index = actual_start_sample;
+    self.segment_writer.segment.index = start_index;
     self.segment_writer.write_index = 0;
     self.status = .recording;
 }
@@ -78,7 +71,7 @@ pub fn finalize(self: *Self, to_frame: u64, keep: bool) !?AudioBuffer {
     self.status = .idle;
     defer self.segment_writer.write_index = 0;
 
-    if (keep) {        
+    if (keep) {
         // Data needs to be written before finalize() is called.
         if (to_frame < self.endIndex()) return error.MissingData;
 

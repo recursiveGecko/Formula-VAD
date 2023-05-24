@@ -124,16 +124,23 @@ pub fn sliceSegment(self: Self, result_segment: *Segment, abs_from: u64, abs_to:
     result_segment.*.length = abs_to - abs_from;
 }
 
-pub fn beginCapture(self: *Self, from_sample: usize) !void {
-    self.recorder.start(from_sample);
+pub fn beginCapture(self: *Self, vad_from_sample: usize) !void {
+    // Add a couple of seconds of buffer to the start of the recording to avoid missing the start
+    const start_buffer = self.config.sample_rate * 2;
+    var actual_start_sample = if (start_buffer > vad_from_sample) 0 else vad_from_sample - start_buffer;
+
+    self.recorder.start(actual_start_sample);
 }
 
-pub fn endCapture(self: *Self, to_sample: usize, keep: bool) !void {
+pub fn endCapture(self: *Self, vad_to_sample: usize, keep: bool) !void {
+    // Ensure we're not cutting off mid-speech
+    var actual_end_sample = vad_to_sample + self.config.sample_rate * 2;
+
     if (keep) {
-        _ = try self.maybeRecordBuffer(to_sample);
+        _ = try self.maybeRecordBuffer(actual_end_sample);
     }
 
-    var maybe_audio_buffer = try self.recorder.finalize(to_sample, keep);
+    var maybe_audio_buffer = try self.recorder.finalize(actual_end_sample, keep);
     if (!keep) return;
 
     if (maybe_audio_buffer) |*audio_buffer| {
