@@ -96,7 +96,7 @@ const WebsocketHandler = struct {
         };
 
         // Demo/Testing: Push the samples to the pipeline
-        try self.pipeline.pushSamples(parsed.pcm);
+        _ = try self.pipeline.pushSamples(parsed.pcm);
 
         // try stdout.print("Client ({any}):\n{any}\n", .{ message.type, parsed });
     }

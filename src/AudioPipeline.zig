@@ -4,14 +4,15 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const PipelineFFT = @import("./AudioPipeline/PipelineFFT.zig");
 const Segment = @import("./AudioPipeline/Segment.zig");
-const VAD = @import("./AudioPipeline/VAD.zig");
-const AudioBuffer = @import("./audio_utils/AudioBuffer.zig");
 const Recorder = @import("./AudioPipeline/Recorder.zig");
 const SplitSlice = @import("./structures/SplitSlice.zig").SplitSlice;
 const MultiRingBuffer = @import("./structures/MultiRingBuffer.zig").MultiRingBuffer;
+pub const VAD = @import("./AudioPipeline/VAD.zig");
+pub const AudioBuffer = @import("./audio_utils/AudioBuffer.zig");
+
 const Self = @This();
 
-pub const PipelineCallbacks = struct {
+pub const Callbacks = struct {
     ctx: *anyopaque,
     on_recording: ?*const fn (ctx: *anyopaque, recording: *const AudioBuffer) void,
 };
@@ -31,12 +32,12 @@ recorder: Recorder,
 /// Slice of slices that temporarily holds the samples to be recorded.
 temp_record_slices: []SplitSlice(f32),
 vad: VAD = undefined,
-callbacks: ?PipelineCallbacks = null,
+callbacks: ?Callbacks = null,
 
 pub fn init(
     allocator: Allocator,
     config: Config,
-    callbacks: ?PipelineCallbacks,
+    callbacks: ?Callbacks,
 ) !*Self {
     // TODO: Calculate a more optional length?
     const buffer_length = config.buffer_length orelse config.sample_rate * 10;
@@ -80,7 +81,9 @@ pub fn deinit(self: *Self) void {
     self.allocator.destroy(self);
 }
 
-pub fn pushSamples(self: *Self, channel_pcm: []const []const f32) !void {
+pub fn pushSamples(self: *Self, channel_pcm: []const []const f32) !u64 {
+    const first_sample_index = self.multi_ring_buffer.total_write_count;
+
     const n_samples = channel_pcm[0].len;
     // Write in chunks of `write_chunk_size` samples to ensure we don't
     // write too much data before processing it
@@ -110,6 +113,8 @@ pub fn pushSamples(self: *Self, channel_pcm: []const []const f32) !void {
         try self.maybeRunPipeline();
         if (n_written < write_chunk_size) break;
     }
+
+    return first_sample_index;
 }
 
 /// Slice samples using absolute indices, from `abs_from` inclusive to `abs_to` exclusive.

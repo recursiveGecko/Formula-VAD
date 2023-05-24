@@ -57,8 +57,8 @@ const PipelineContext = struct {
         log.debug("Saved audio: {s}", .{path});
     }
 
-    pub fn toPipelineCallbacks(self: *Ctx) AudioPipeline.PipelineCallbacks {
-        return AudioPipeline.PipelineCallbacks{
+    pub fn toPipelineCallbacks(self: *Ctx) AudioPipeline.Callbacks {
+        return AudioPipeline.Callbacks{
             .ctx = self,
             .on_recording = &Ctx.onRecording,
         };
@@ -152,7 +152,7 @@ pub fn run(self: *Self) !void {
 }
 
 fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VAD.VADSpeechSegment {
-    var ctx = PipelineContext{
+    var pipeline_ctx = PipelineContext{
         .sim_instance = self,
     };
 
@@ -164,7 +164,7 @@ fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VAD.VA
             .vad_config = self.sim_config.vad_config,
             // .skip_processing = true,
         },
-        ctx.toPipelineCallbacks(),
+        pipeline_ctx.toPipelineCallbacks(),
     );
     defer pipeline.deinit();
 
@@ -199,11 +199,11 @@ fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VAD.VA
                 trimmed_channel_pcm[i] = backing_channel_pcm[i][0..frames_read];
             }
 
-            try pipeline.pushSamples(trimmed_channel_pcm);
+            _ = try pipeline.pushSamples(trimmed_channel_pcm);
         }
     } else if (audio.* == .buffer) {
         var audio_buffer = audio.buffer;
-        try pipeline.pushSamples(audio_buffer.channel_pcm_buf);
+        _ = try pipeline.pushSamples(audio_buffer.channel_pcm_buf);
     } else {
         unreachable;
     }

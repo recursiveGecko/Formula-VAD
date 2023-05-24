@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ingress = @import("./ingress.zig");
+pub const AudioPipeline = @import("./AudioPipeline.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -24,6 +25,6 @@ pub fn audioTest(allocator: Allocator) !void {
 }
 
 test {
-    _ = @import("./AudioPipeline.zig");
+    _ = AudioPipeline;
     _ = @import("./structures/MultiRingBuffer.zig");
 }
