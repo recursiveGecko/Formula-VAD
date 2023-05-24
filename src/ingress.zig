@@ -54,10 +54,14 @@ const WebsocketHandler = struct {
         self.arena = std.heap.ArenaAllocator.init(context.child_allocator);
 
         // Demo/Testing: Create a new AudioPipeline
-        self.pipeline = try AudioPipeline.init(context.child_allocator, .{
-            .n_channels = 2,
-            .sample_rate = 48000,
-        });
+        self.pipeline = try AudioPipeline.init(
+            context.child_allocator,
+            .{
+                .n_channels = 2,
+                .sample_rate = 48000,
+            },
+            null,
+        );
 
         return self;
     }

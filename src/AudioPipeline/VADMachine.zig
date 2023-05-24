@@ -33,7 +33,7 @@ pub const Config = struct {
     /// Conditions need to be met for this many consecutive milliseconds before speech is triggered
     min_consecutive_sec_to_open: f32 = 0.2,
     /// Maximum gap where speech is still considered to be ongoing
-    max_speech_gap_sec: f32 = 1,
+    max_speech_gap_sec: f32 = 2,
     /// Minimum duration of speech segments
     min_vad_duration_sec: f32 = 0.7,
 };

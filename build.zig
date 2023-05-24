@@ -149,27 +149,32 @@ fn addKissFFT(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOption
     }
 }
 
+var rnnoiseLib: ?*std.Build.Step.Compile = null;
 fn addRnnoise(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
-    const rnnSources = try prefixedPaths(b.allocator, "lib/rnnoise/src", &.{
-        "denoise.c",
-        "celt_lpc.c",
-        "kiss_fft.c",
-        "pitch.c",
-        "rnn_data.c",
-        "rnn_reader.c",
-        "rnn.c",
-    });
+    if (rnnoiseLib == null) {
+        const rnnSources = try prefixedPaths(b.allocator, "lib/rnnoise/src", &.{
+            "denoise.c",
+            "celt_lpc.c",
+            "kiss_fft.c",
+            "pitch.c",
+            "rnn_data.c",
+            "rnn_reader.c",
+            "rnn.c",
+        });
 
-    const rnnoiseLib = b.addStaticLibrary(.{
-        .name = "rnnoise",
-        .target = options.target,
-        .optimize = options.optimize,
-    });
-    rnnoiseLib.addCSourceFiles(rnnSources, &.{});
-    rnnoiseLib.linkLibC();
-    rnnoiseLib.addIncludePath("lib/rnnoise/include");
+        var lib = b.addStaticLibrary(.{
+            .name = "rnnoise",
+            .target = options.target,
+            .optimize = options.optimize,
+        });
+        lib.addCSourceFiles(rnnSources, &.{});
+        lib.linkLibC();
+        lib.addIncludePath("lib/rnnoise/include");
 
-    exe.linkLibrary(rnnoiseLib);
+        rnnoiseLib = lib;
+    }
+
+    exe.linkLibrary(rnnoiseLib.?);
     exe.addIncludePath("lib/rnnoise/include");
 }
 
@@ -179,28 +184,37 @@ fn addSndfile(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOption
     exe.linkSystemLibrary("sndfile");
 }
 
+var zbor_module: ?*std.Build.Module = null;
 fn addZbor(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
     _ = options;
-    var zbor_module = b.createModule(.{
-        .source_file = .{ .path = "lib/zbor/src/main.zig" },
-    });
-    exe.addModule("zbor", zbor_module);
+    if (zbor_module == null) {
+        zbor_module = b.createModule(.{
+            .source_file = .{ .path = "lib/zbor/src/main.zig" },
+        });
+    }
+    exe.addModule("zbor", zbor_module.?);
 }
 
+var websocket_module: ?*std.Build.Module = null;
 fn addWebsocket(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
     _ = options;
-    var websocket_module = b.createModule(.{
-        .source_file = .{ .path = "lib/websocket/src/websocket.zig" },
-    });
-    exe.addModule("websocket", websocket_module);
+    if (websocket_module == null) {
+        websocket_module = b.createModule(.{
+            .source_file = .{ .path = "lib/websocket/src/websocket.zig" },
+        });
+    }
+    exe.addModule("websocket", websocket_module.?);
 }
 
+var clap_module: ?*std.Build.Module = null;
 fn addClap(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
     _ = options;
-    var clap_module = b.createModule(.{
-        .source_file = .{ .path = "lib/zig-clap/clap.zig" },
-    });
-    exe.addModule("clap", clap_module);
+    if (clap_module == null) {
+        clap_module = b.createModule(.{
+            .source_file = .{ .path = "lib/zig-clap/clap.zig" },
+        });
+    }
+    exe.addModule("clap", clap_module.?);
 }
 
 // fn addZigGameDev(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {

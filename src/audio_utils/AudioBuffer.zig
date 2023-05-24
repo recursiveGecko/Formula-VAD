@@ -2,7 +2,15 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const AudioFileStream = @import("AudioFileStream.zig");
+const sndfile = @cImport({
+    @cInclude("sndfile.h");
+});
+
 const Self = @This();
+
+pub const Format = enum(u32) {
+    vorbis = sndfile.SF_FORMAT_OGG | sndfile.SF_FORMAT_VORBIS,
+};
 
 allocator: Allocator,
 n_channels: usize,
@@ -44,6 +52,48 @@ pub fn loadFromFile(allocator: Allocator, path: []const u8) !Self {
         .length = stream.length,
         .duration_seconds = @intToFloat(f32, stream.length) / @intToFloat(f32, stream.sample_rate),
     };
+}
+
+pub fn saveToFile(self: *const Self, path: [] const u8, format: Format) !void {
+    const path_Z = try self.allocator.dupeZ(u8, path);
+    defer self.allocator.free(path_Z);
+
+    var sf_info = std.mem.zeroInit(sndfile.SF_INFO, .{
+        .samplerate = @intCast(i32, self.sample_rate),
+        .channels = @intCast(i32, self.n_channels),
+        .format = @intCast(i32, @enumToInt(format)),
+    });
+
+    var sf_file = sndfile.sf_open(path_Z.ptr, sndfile.SFM_WRITE, &sf_info);
+    defer _ = sndfile.sf_close(sf_file);
+
+    var quality: f64 = 1;
+    var cmd_resut = sndfile.sf_command(sf_file, sndfile.SFC_SET_VBR_ENCODING_QUALITY, &quality,  @sizeOf(f64));
+    assert(cmd_resut == 1);
+
+    const frames_per_write = self.sample_rate;
+    var write_buffer = try self.allocator.alloc(f32, self.n_channels * frames_per_write);
+    defer self.allocator.free(write_buffer);
+
+    var frames_read_count: usize = 0;
+    while (frames_read_count < self.length) {
+        const frames_to_write = @min(self.length - frames_read_count, frames_per_write);
+
+        for (0..frames_to_write) |frame_idx| {
+            const read_idx = frames_read_count + frame_idx;
+
+            for (0..self.n_channels) |channel_idx| {
+                const write_idx = frame_idx * self.n_channels + channel_idx;
+                
+                write_buffer[write_idx] = self.channel_pcm_buf[channel_idx][read_idx];
+            }
+        }
+
+        const frames_written = sndfile.sf_writef_float(sf_file, write_buffer.ptr, @intCast(i64, frames_to_write));
+        assert(frames_written == frames_to_write);
+
+        frames_read_count += @intCast(usize, frames_written);
+    }
 }
 
 pub fn deinit(self: *Self) void {

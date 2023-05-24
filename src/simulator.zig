@@ -128,29 +128,17 @@ pub fn main() !void {
 }
 
 pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
+    const base_path = fs.path.dirname(json_path) orelse ".";
+
+    // Read and parse the simulation plan JSON
     const plan_contents = try fs.Dir.readFileAlloc(fs.cwd(), allocator, json_path, 10 * megabyte);
     defer allocator.free(plan_contents);
 
-    const base_path = fs.path.dirname(json_path) orelse ".";
     const plan_json: SimulationJSON = try std.json.parseFromSlice(SimulationJSON, allocator, plan_contents, .{
         .ignore_unknown_fields = true,
     });
 
-    var instances = try allocator.alloc(SimulationInstance, plan_json.instances.len);
-    var instances_alloc: usize = 0;
-    errdefer {
-        for (0..instances_alloc) |i| instances[i].deinit();
-        allocator.free(instances);
-    }
-
-    for (plan_json.instances, 0..) |instance_json, i| {
-        instances[i] = try SimulationInstance.init(allocator, base_path, instance_json, plan_json.config);
-        instances_alloc += 1;
-    }
-
-    var simulation = try allocator.create(Simulation);
-    errdefer allocator.destroy(simulation);
-
+    // If output dir was specified, create a timestamped output directory for this simulation
     var resolved_out_path: ?[]const u8 = val: {
         if (plan_json.config.output_dir) |out_dir| {
             const subdir_name = try std.fmt.allocPrint(allocator, "{d}", .{std.time.timestamp()});
@@ -165,11 +153,43 @@ pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
     };
     errdefer if (resolved_out_path) |path| allocator.free(path);
 
+    // Maybe copy the plan JSON to the output directory
     if (resolved_out_path) |out_dir| {
         const json_copy_path = try fs.path.join(allocator, &.{ out_dir, "plan.json" });
         defer allocator.free(json_copy_path);
         try fs.Dir.writeFile(fs.cwd(), json_copy_path, plan_contents);
     }
+
+    // Allocate instances
+    var instances = try allocator.alloc(SimulationInstance, plan_json.instances.len);
+    var instances_alloc: usize = 0;
+    errdefer {
+        for (0..instances_alloc) |i| instances[i].deinit();
+        allocator.free(instances);
+    }
+
+    // Initialize instances, maybe creating output directories for each
+    for (plan_json.instances, 0..) |instance_json, i| {
+        var out_dir = val: {
+            if (resolved_out_path == null) break :val null;
+
+            const instance_out_dir = try fs.path.resolve(allocator, &.{ resolved_out_path.?, instance_json.name });
+            try fs.Dir.makePath(fs.cwd(), instance_out_dir);
+            break :val instance_out_dir;
+        };
+
+        instances[i] = try SimulationInstance.init(
+            allocator,
+            base_path,
+            out_dir,
+            instance_json,
+            plan_json.config,
+        );
+        instances_alloc += 1;
+    }
+
+    var simulation = try allocator.create(Simulation);
+    errdefer allocator.destroy(simulation);
 
     simulation.* = Simulation{
         .instances = instances,

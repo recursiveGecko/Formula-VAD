@@ -30,6 +30,22 @@ pub fn SplitSlice(comptime T: type) type {
             return self;
         }
 
+        pub fn deinit(self: *Self) void {
+            if (self.allocator) |allocator| {
+                switch (self.owned_slices) {
+                    .none => {},
+                    .first => allocator.free(self.first),
+                    .second => allocator.free(self.second),
+                    .both => {
+                        allocator.free(self.first);
+                        allocator.free(self.second);
+                    },
+                }
+
+                self.owned_slices = .none;
+            }
+        }
+
         pub fn len(self: Self) usize {
             return self.first.len + self.second.len;
         }
@@ -62,20 +78,33 @@ pub fn SplitSlice(comptime T: type) type {
             return new_self;
         }
 
-        pub fn deinit(self: *Self) void {
-            if (self.allocator) |allocator| {
-                switch (self.owned_slices) {
-                    .none => {},
-                    .first => allocator.free(self.first),
-                    .second => allocator.free(self.second),
-                    .both => {
-                        allocator.free(self.first);
-                        allocator.free(self.second);
-                    },
-                }
+        pub fn resize(self: *Self, new_size: usize, init_val: T) !void {
+            // Only SplitSlices which own the first slice and
+            // don't have a second slice can be resized.
+            if (self.owned_slices != .first) return error.Unsupported;
 
-                self.owned_slices = .none;
+            const current_size = self.first.len;
+
+            const resized = self.allocator.?.resize(self.first, new_size);
+            if (resized) {
+                self.first = self.first[0..new_size];
+                return;
             }
+
+            var new_first = try self.allocator.?.alloc(T, new_size);
+            errdefer self.allocator.?.free(new_first);
+
+            const n_to_copy = @min(current_size, new_size);
+            var src = self.first[0..n_to_copy];
+            var dst = new_first[0..n_to_copy];
+            @memcpy(dst, src);
+
+            for (n_to_copy..new_size) |i| {
+                new_first[i] = init_val;
+            }
+
+            self.allocator.?.free(self.first);
+            self.first = new_first;
         }
     };
 }

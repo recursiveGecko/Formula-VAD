@@ -41,6 +41,11 @@ pub const VADMachineResult = struct {
     sample_number: u64,
 };
 
+const PreAnalysis = struct {
+    volume_ratio: f32,
+};
+
+
 pub const AnalyzedSegment = struct {
     input_segment: ?*const Segment = null,
     segment: Segment,
@@ -61,6 +66,7 @@ pub const AnalyzedSegment = struct {
         self.segment.deinit();
     }
 };
+
 
 allocator: Allocator,
 pipeline: *AudioPipeline,
@@ -89,6 +95,7 @@ temp_pipeline_fft_result: PipelineFFT.Result,
 // Speech state machine
 vad_machine: VADMachine,
 alt_vad_machines: ?[]VADMachine,
+
 
 pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     const sample_rate = pipeline.config.sample_rate;
@@ -238,9 +245,6 @@ fn collectInputStep(self: *Self) !void {
     }
 }
 
-const PreAnalysis = struct {
-    volume_ratio: f32,
-};
 
 fn preAnalyzeSegment(input_segment: *const Segment) PreAnalysis {
     const n_channels = input_segment.channel_pcm_buf.len;
@@ -300,7 +304,7 @@ fn fftBufferStep(
     // So we might have to split it into multiple FFT buffer writes
     var denoised_buf_offset: usize = 0;
     while (true) {
-        const written = try fft_buffer.write(fft_buf_segment.*, denoised_buf_offset);
+        const written = try fft_buffer.write(fft_buf_segment, denoised_buf_offset, null);
         denoised_buf_offset += written;
         std.debug.assert(denoised_buf_offset <= fft_buf_segment.length);
 

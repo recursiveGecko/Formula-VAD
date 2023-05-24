@@ -1,19 +1,20 @@
 //! `Segment` is a container for multiple channels of audio data.
-//! 
+//!
 //! Each audio channel is represented by a `SplitSlice` of `f32` samples, which allows
-//! us to wrap non-contiguous audio samples (e.g. originating from a ring buffer) in 
+//! us to wrap non-contiguous audio samples (e.g. originating from a ring buffer) in
 //! a single struct without creating a copy.
-//! 
+//!
 //! Each segment has an `index`, which corresponds to the index of the first sample
 //! in the segment. This index combined with the sample rate, can be used to calculate
 //! precise timestamps for the samples in the segment, relative to the beginning of the
 //! AudioPipeline. Every step in the pipeline is responsible for keeping this index
 //! accurate when slicing or combining segments.
-//! 
+//!
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const SplitSlice = @import("../structures/SplitSlice.zig").SplitSlice;
+const AudioBuffer = @import("../audio_utils/AudioBuffer.zig");
 
 const Self = @This();
 
@@ -48,6 +49,16 @@ pub fn initWithCapacity(allocator: Allocator, n_channels: usize, length: usize) 
     };
 
     return self;
+}
+
+pub fn deinit(self: *Self) void {
+    for (self.channel_pcm_buf) |*channel_pcm| {
+        channel_pcm.deinit();
+    }
+
+    if (self.allocator) |allocator| {
+        allocator.free(self.channel_pcm_buf);
+    }
 }
 
 /// Creates a *deep copy* of the Segment.
@@ -106,12 +117,11 @@ pub fn copyCapacity(self: *Self, allocator: Allocator) !Self {
     return new_self;
 }
 
-pub fn deinit(self: *Self) void {
-    for (self.channel_pcm_buf) |*channel_pcm| {
-        channel_pcm.deinit();
+pub fn resize(self: *Self, new_size: usize) !void {
+    // This could be problematic if some of the resize operations fail.
+    for (self.channel_pcm_buf) |*channel| {
+        try channel.resize(new_size, 0);
     }
-
-    if (self.allocator) |allocator| {
-        allocator.free(self.channel_pcm_buf);
-    }
+    
+    self.length = new_size;
 }

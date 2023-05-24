@@ -13,13 +13,17 @@ allocator: Allocator,
 segment: Segment,
 write_index: usize = 0,
 
-pub fn init(allocator: Allocator, n_channels: usize, length: usize) !Self {
-    var segment_ = try Segment.initWithCapacity(allocator, n_channels, length);
-    errdefer segment_.deinit();
+pub fn init(
+    allocator: Allocator,
+    n_channels: usize,
+    length: usize,
+) !Self {
+    var segment = try Segment.initWithCapacity(allocator, n_channels, length);
+    errdefer segment.deinit();
 
     var self = Self{
         .allocator = allocator,
-        .segment = segment_,
+        .segment = segment,
     };
 
     return self;
@@ -33,19 +37,25 @@ pub fn deinit(self: *Self) void {
 /// When the return value is less than the length of the source buffer, it means that
 /// the buffer is full and the buffer segment should be used in some way before
 /// calling .reset(), followed by a second .write() with the offset returned from this call.
-pub fn write(self: *Self, other: Segment, offset: usize) !usize {
+pub fn write(self: *Self, other: *const Segment, offset: usize, max_write: ?usize) !usize {
     var segment = self.segment;
 
     // Determine the capacity of the internal buffer
     const capacity = segment.length;
-    const remaining_capacity = capacity - self.write_index;
+    const remaining_capacity = if (self.write_index < capacity) capacity - self.write_index else 0;
 
     if (remaining_capacity == 0) {
         return 0;
     }
 
     // number of source samples we have left to write
-    const other_rem = other.length - offset;
+    const other_rem = val: {
+        if (max_write) |max_w| {
+            break :val @min(max_w, other.length - offset);
+        } else {
+            break :val other.length - offset;
+        }
+    };
     // number of source samples we can write before we fill the buffer
     const to_write = @min(remaining_capacity, other_rem);
 
@@ -97,6 +107,10 @@ pub fn reset(self: *Self, new_segment_index: u64) void {
     self.segment.index = new_segment_index;
 }
 
+pub fn resize(self: *Self, new_size: usize) !void {
+    try self.segment.resize(new_size);
+}
+
 //
 // Tests
 //
@@ -126,29 +140,28 @@ test "SegmentWriter" {
     };
     var written: usize = undefined;
 
-
     // Write all 4 samples of the pattern
-    written = try segment_writer.write(segment, 0);
+    written = try segment_writer.write(&segment, 0, null);
     try expectEqual(written, 4);
-    
+
     // Write last 2 samples of the pattern
-    written = try segment_writer.write(segment, 2);
+    written = try segment_writer.write(&segment, 2, null);
     try expectEqual(written, 2);
 
     // Write last 3 samples of the pattern
-    written = try segment_writer.write(segment, 1);
+    written = try segment_writer.write(&segment, 1, null);
     try expectEqual(written, 3);
 
     // Ensure we're at correct position
     try expectEqual(segment_writer.write_index, 9);
 
-    // Try to write the last 2 samples of the pattern, 
+    // Try to write the last 2 samples of the pattern,
     // but only 1 should be written
-    written = try segment_writer.write(segment, 2);
+    written = try segment_writer.write(&segment, 2, null);
     try expectEqual(written, 1);
 
     // 0 Samples should be written when the buffer is full
-    try expectEqual(segment_writer.write(segment, 3), 0);
+    try expectEqual(segment_writer.write(&segment, 3, null), 0);
 
     const expected: []const f32 = &.{ 1, 2, 3, 4, 3, 4, 2, 3, 4, 3 };
 

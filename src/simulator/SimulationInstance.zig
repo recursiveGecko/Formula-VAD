@@ -16,10 +16,63 @@ const log = std.log.scoped(.sim_instance);
 const fs = std.fs;
 
 const Self = @This();
+const SimulationInstance = @This();
+
+// Wraps the pipeline context that is required for AudioPipeline callbacks
+const PipelineContext = struct {
+    const Ctx = @This();
+
+    sim_instance: *SimulationInstance,
+    recording_count: usize = 0,
+
+    pub fn onRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
+        const ctx = castToSelf(opaque_ctx);
+        const allocator = ctx.sim_instance.main_thread_allocator;
+
+        if (ctx.sim_instance.output_dir == null) return;
+
+        defer ctx.recording_count += 1;
+
+        const file_name = std.fmt.allocPrint(
+            allocator,
+            "{d:0>3}-{s}.ogg",
+            .{ ctx.recording_count, ctx.sim_instance.name },
+        ) catch |err| {
+            log.err("Failed to allocate file name: {any}", .{err});
+            return;
+        };
+        defer allocator.free(file_name);
+
+        const path = fs.path.resolve(allocator, &.{ ctx.sim_instance.output_dir.?, file_name }) catch |err| {
+            log.err("Failed to allocate file path: {any}", .{err});
+            return;
+        };
+        defer allocator.free(path);
+
+        audio_buffer.saveToFile(path, AudioBuffer.Format.vorbis) catch |err| {
+            log.err("Failed to save file to disk: {any}", .{err});
+            return;
+        };
+
+        log.debug("Saved audio: {s}", .{path});
+    }
+
+    pub fn toPipelineCallbacks(self: *Ctx) AudioPipeline.PipelineCallbacks {
+        return AudioPipeline.PipelineCallbacks{
+            .ctx = self,
+            .on_recording = &Ctx.onRecording,
+        };
+    }
+
+    fn castToSelf(opaque_ctx: *anyopaque) *Ctx {
+        const aligned = @alignCast(@alignOf(Ctx), opaque_ctx);
+        return @ptrCast(*Ctx, aligned);
+    }
+};
 
 name: []const u8,
 audio_source: *AudioSource,
-output_dir: []const u8,
+output_dir: ?[]const u8,
 reference_segments: []const Evaluator.SpeechSegment,
 evaluator: ?Evaluator = null,
 sim_config: DynamicSimConfig,
@@ -28,6 +81,7 @@ main_thread_allocator: Allocator,
 pub fn init(
     allocator: Allocator,
     base_path: []const u8,
+    output_dir: ?[]const u8,
     instance_json: SimulationInstanceJSON,
     sim_config: DynamicSimConfig,
 ) !Self {
@@ -56,7 +110,7 @@ pub fn init(
 
     return Self{
         .name = name,
-        .output_dir = "",
+        .output_dir = output_dir,
         .audio_source = audio_source,
         .reference_segments = ref_segments,
         .evaluator = null,
@@ -71,8 +125,8 @@ pub fn deinit(self: *@This()) void {
     self.audio_source.deinit();
     alloc.destroy(self.audio_source);
     alloc.free(self.name);
-    alloc.free(self.output_dir);
     alloc.free(self.reference_segments);
+    if (self.output_dir) |od| alloc.free(od);
     if (self.evaluator) |*e| e.deinit();
 }
 
@@ -98,12 +152,20 @@ pub fn run(self: *Self) !void {
 }
 
 fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VAD.VADSpeechSegment {
-    const pipeline = try AudioPipeline.init(allocator, .{
-        .sample_rate = audio.sampleRate(),
-        .n_channels = audio.nChannels(),
-        .vad_config = self.sim_config.vad_config,
-        // .skip_processing = true,
-    });
+    var ctx = PipelineContext{
+        .sim_instance = self,
+    };
+
+    const pipeline = try AudioPipeline.init(
+        allocator,
+        .{
+            .sample_rate = audio.sampleRate(),
+            .n_channels = audio.nChannels(),
+            .vad_config = self.sim_config.vad_config,
+            // .skip_processing = true,
+        },
+        ctx.toPipelineCallbacks(),
+    );
     defer pipeline.deinit();
 
     // const sample_rate = audio.sampleRate();
