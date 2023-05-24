@@ -1,15 +1,14 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const ingress = @import("./ingress.zig");
 pub const AudioPipeline = @import("./AudioPipeline.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var allocator = gpa.allocator();
+    _ = allocator;
     defer _ = gpa.deinit();
 
     // try audioTest(allocator);
-    try ingress.start(allocator);
 }
 
 pub fn audioTest(allocator: Allocator) !void {

@@ -18,6 +18,28 @@ const CommonOptions = struct {
     optimize: std.builtin.OptimizeMode,
 };
 
+pub fn linkPackage(
+    b: *std.Build,
+    exe: *std.Build.CompileStep,
+    target: std.zig.CrossTarget,
+    optimize: std.builtin.Mode,
+) !void {
+    const common_options = CommonOptions{
+        .target = target,
+        .optimize = optimize,
+    };
+
+    const pkg = b.createModule(.{
+        .source_file = .{ .path = thisFileDir() ++ "/src/package.zig" },
+        .dependencies = &.{},
+    });
+
+    exe.addModule("formula_vad", pkg);
+    try addRnnoise(b, exe, common_options);
+    try addKissFFT(b, exe, common_options);
+    try addSndfile(b, exe, common_options);
+}
+
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -40,8 +62,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     // try addZigGameDev(b, exe, common_options);
-    try addZbor(b, exe, common_options);
-    try addWebsocket(b, exe, common_options);
+    exe.addModule("clap", try getClapModule(b, common_options));
     try addSndfile(b, exe, common_options);
     try addKissFFT(b, exe, common_options);
     try addRnnoise(b, exe, common_options);
@@ -84,7 +105,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    try addClap(b, evaluator_exe, common_options);
+    evaluator_exe.addModule("clap", try getClapModule(b, common_options));
     b.installArtifact(evaluator_exe);
 
     const evaluator_run_cmd = b.addRunArtifact(evaluator_exe);
@@ -104,7 +125,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    try addClap(b, simulator_exe, common_options);
+    simulator_exe.addModule("clap", try getClapModule(b, common_options));
     try addSndfile(b, simulator_exe, common_options);
     try addKissFFT(b, simulator_exe, common_options);
     try addRnnoise(b, simulator_exe, common_options);
@@ -119,40 +140,47 @@ pub fn build(b: *std.Build) !void {
     simulator_run_step.dependOn(&simulator_run_cmd.step);
 }
 
+var kiss_fft_lib: ?*std.Build.Step.Compile = null;
 fn addKissFFT(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
     const macros: []const KV = &.{
         .{ "kiss_fft_scalar", "float" },
     };
 
-    const source_files = try prefixedPaths(b.allocator, "lib/kissfft", &.{
-        // "kfc.c",
-        "kiss_fft.c",
-        // "kiss_fftnd.c",
-        // "kiss_fftndr.c",
-        "kiss_fftr.c",
-    });
+    if (kiss_fft_lib == null) {
+        const dir = thisFileDir() ++ "/lib/kissfft";
+        const source_files = try prefixedPaths(b.allocator, dir, &.{
+            // "kfc.c",
+            "kiss_fft.c",
+            // "kiss_fftnd.c",
+            // "kiss_fftndr.c",
+            "kiss_fftr.c",
+        });
 
-    var kissfft_lib = b.addStaticLibrary(.{
-        .name = "kissfft",
-        .optimize = options.optimize,
-        .target = options.target,
-    });
-    kissfft_lib.linkLibC();
-    kissfft_lib.addCSourceFiles(source_files, &.{"-Wall"});
+        const lib = b.addStaticLibrary(.{
+            .name = "kissfft",
+            .optimize = options.optimize,
+            .target = options.target,
+        });
 
-    exe.addIncludePath("lib/kissfft");
-    exe.linkLibrary(kissfft_lib);
+        lib.linkLibC();
+        lib.addCSourceFiles(source_files, &.{"-Wall"});
 
-    for (macros) |macro| {
-        kissfft_lib.defineCMacro(macro.k(), macro.v());
-        exe.defineCMacro(macro.k(), macro.v());
+        for (macros) |macro| {
+            lib.defineCMacro(macro.k(), macro.v());
+        }
+
+        kiss_fft_lib = lib;
     }
+
+    exe.addIncludePath(thisFileDir() ++ "/lib/kissfft");
+    exe.linkLibrary(kiss_fft_lib.?);
 }
 
 var rnnoiseLib: ?*std.Build.Step.Compile = null;
 fn addRnnoise(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
     if (rnnoiseLib == null) {
-        const rnnSources = try prefixedPaths(b.allocator, "lib/rnnoise/src", &.{
+        const dir = thisFileDir() ++ "/lib/rnnoise/src";
+        const rnnSources = try prefixedPaths(b.allocator, dir, &.{
             "denoise.c",
             "celt_lpc.c",
             "kiss_fft.c",
@@ -169,13 +197,13 @@ fn addRnnoise(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOption
         });
         lib.addCSourceFiles(rnnSources, &.{});
         lib.linkLibC();
-        lib.addIncludePath("lib/rnnoise/include");
+        lib.addIncludePath(thisFileDir() ++ "/lib/rnnoise/include");
 
         rnnoiseLib = lib;
     }
 
     exe.linkLibrary(rnnoiseLib.?);
-    exe.addIncludePath("lib/rnnoise/include");
+    exe.addIncludePath(thisFileDir() ++ "/lib/rnnoise/include");
 }
 
 fn addSndfile(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
@@ -184,68 +212,17 @@ fn addSndfile(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOption
     exe.linkSystemLibrary("sndfile");
 }
 
-var zbor_module: ?*std.Build.Module = null;
-fn addZbor(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
-    _ = options;
-    if (zbor_module == null) {
-        zbor_module = b.createModule(.{
-            .source_file = .{ .path = "lib/zbor/src/main.zig" },
-        });
-    }
-    exe.addModule("zbor", zbor_module.?);
-}
-
-var websocket_module: ?*std.Build.Module = null;
-fn addWebsocket(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
-    _ = options;
-    if (websocket_module == null) {
-        websocket_module = b.createModule(.{
-            .source_file = .{ .path = "lib/websocket/src/websocket.zig" },
-        });
-    }
-    exe.addModule("websocket", websocket_module.?);
-}
-
 var clap_module: ?*std.Build.Module = null;
-fn addClap(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
+fn getClapModule(b: *std.Build, options: CommonOptions) !*std.Build.Module {
     _ = options;
     if (clap_module == null) {
         clap_module = b.createModule(.{
             .source_file = .{ .path = "lib/zig-clap/clap.zig" },
         });
     }
-    exe.addModule("clap", clap_module.?);
+
+    return clap_module.?;
 }
-
-// fn addZigGameDev(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
-//     const zgui = @import("lib/zig-gamedev/libs/zgui/build.zig");
-//     const zglfw = @import("lib/zig-gamedev/libs/zglfw/build.zig");
-//     const zgpu = @import("lib/zig-gamedev/libs/zgpu/build.zig");
-//     const zpool = @import("lib/zig-gamedev/libs/zpool/build.zig");
-
-//     const target = options.target;
-//     const optimize = options.optimize;
-
-//     const zgui_pkg = zgui.package(b, target, optimize, .{
-//         .options = .{
-//             .backend = .glfw_wgpu,
-//         },
-//     });
-//     zgui_pkg.link(exe);
-
-//     // Needed for glfw/wgpu rendering backend
-//     const zglfw_pkg = zglfw.package(b, target, optimize, .{});
-//     const zpool_pkg = zpool.package(b, target, optimize, .{});
-//     const zgpu_pkg = zgpu.package(b, target, optimize, .{
-//         .deps = .{
-//             .zpool = zpool_pkg.zpool,
-//             .zglfw = zglfw_pkg.zglfw,
-//         },
-//     });
-
-//     zglfw_pkg.link(exe);
-//     zgpu_pkg.link(exe);
-// }
 
 fn prefixedPaths(allocator: std.mem.Allocator, prefix: []const u8, paths: []const []const u8) ![][]const u8 {
     const prefixed_paths = try allocator.alloc([]const u8, paths.len);
@@ -255,4 +232,8 @@ fn prefixedPaths(allocator: std.mem.Allocator, prefix: []const u8, paths: []cons
     }
 
     return prefixed_paths;
+}
+
+inline fn thisFileDir() []const u8 {
+    return comptime std.fs.path.dirname(@src().file) orelse ".";
 }
