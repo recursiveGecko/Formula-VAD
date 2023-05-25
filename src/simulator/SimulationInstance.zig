@@ -85,7 +85,7 @@ pub fn init(
     instance_json: SimulationInstanceJSON,
     sim_config: DynamicSimConfig,
 ) !Self {
-    const name = try allocator.dupeZ(u8, instance_json.name);
+    const name = try allocator.dupe(u8, instance_json.name);
     errdefer allocator.free(name);
 
     const audio_path = try fs.path.resolve(allocator, &.{ base_path, instance_json.audio_path });
