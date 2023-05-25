@@ -175,6 +175,7 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
 
         for (0..alt_vad_configs.len) |i| {
             self.alt_vad_machines.?[i] = try VADMachine.init(allocator, alt_vad_configs[i], self);
+            n_alt_vad_initialized = i + 1;
         }
     }
 
@@ -184,6 +185,7 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
 pub fn deinit(self: *Self) void {
     if (self.alt_vad_machines) |alt_vad| {
         for (alt_vad) |*v| v.deinit();
+        self.allocator.free(alt_vad);
     }
     self.vad_machine.deinit();
     self.denoiser.deinit();
