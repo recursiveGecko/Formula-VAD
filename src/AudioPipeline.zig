@@ -197,3 +197,21 @@ fn maybeRecordBuffer(self: *Self, to_sample: usize) !bool {
 test {
     _ = @import("./AudioPipeline/SegmentWriter.zig");
 }
+
+test "simple leak test" {
+    var pipeline = try init(
+        std.testing.allocator,
+        .{
+            .n_channels = 2,
+            .sample_rate = 48000,
+            .vad_config = .{
+                .alt_vad_machine_configs = &.{
+                    .{},
+                    .{},
+                }
+            }
+        },
+        null,
+    );
+    defer pipeline.deinit();
+}

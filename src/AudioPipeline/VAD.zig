@@ -19,7 +19,7 @@ pub const Config = struct {
     use_denoiser: bool = true,
     vad_machine_config: VADMachine.Config = .{},
     // Alternative state machine configs for training
-    alt_vad_machine_configs: ?[]VADMachine.Config = null,
+    alt_vad_machine_configs: ?[]const VADMachine.Config = null,
 };
 
 pub const VADSpeechSegment = struct {
