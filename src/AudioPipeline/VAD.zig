@@ -45,7 +45,6 @@ const PreAnalysis = struct {
     volume_ratio: f32,
 };
 
-
 pub const AnalyzedSegment = struct {
     input_segment: ?*const Segment = null,
     segment: Segment,
@@ -66,7 +65,6 @@ pub const AnalyzedSegment = struct {
         self.segment.deinit();
     }
 };
-
 
 allocator: Allocator,
 pipeline: *AudioPipeline,
@@ -96,7 +94,6 @@ temp_pipeline_fft_result: PipelineFFT.Result,
 vad_machine: VADMachine,
 alt_vad_machines: ?[]VADMachine,
 
-
 pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     const sample_rate = pipeline.config.sample_rate;
     const n_channels = pipeline.config.n_channels;
@@ -118,6 +115,12 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
         .length = undefined,
     };
     errdefer temp_input_segment.deinit();
+    for (0..n_channels) |i| {
+        temp_input_segment.channel_pcm_buf[i] = .{
+            .owned_slices = .none,
+            .first = &.{},
+        };
+    }
 
     var temp_denoiser_segment = try AnalyzedSegment.init(
         allocator,
@@ -246,7 +249,6 @@ fn collectInputStep(self: *Self) !void {
         }
     }
 }
-
 
 fn preAnalyzeSegment(input_segment: *const Segment) PreAnalysis {
     const n_channels = input_segment.channel_pcm_buf.len;
