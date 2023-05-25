@@ -113,6 +113,7 @@ fn segmentToAudioBuffer(segment: Segment, sample_rate: usize) !AudioBuffer {
         .n_channels = n_channels,
         .duration_seconds = @intToFloat(f32, segment.length) / @intToFloat(f32, sample_rate),
         .channel_pcm_buf = channel_pcm_buf,
+        .global_start_frame_number = segment.index,
     };
 
     return audio_buffer;
