@@ -55,6 +55,8 @@ pub const Simulation = struct {
     pub fn deinit(self: *@This()) void {
         std.json.parseFree(SimulationJSON, self.allocator, self.original_json);
         if (self.resolved_out_path) |path| self.allocator.free(path);
+        for (self.instances) |*instance| instance.deinit();
+        self.allocator.free(self.instances);
     }
 };
 
