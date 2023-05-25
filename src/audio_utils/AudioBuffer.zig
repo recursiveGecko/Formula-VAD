@@ -10,6 +10,7 @@ const Self = @This();
 
 pub const Format = enum(u32) {
     vorbis = sndfile.SF_FORMAT_OGG | sndfile.SF_FORMAT_VORBIS,
+    wav = sndfile.SF_FORMAT_WAV | sndfile.SF_FORMAT_FLOAT,
 };
 
 allocator: Allocator,
@@ -57,7 +58,7 @@ pub fn loadFromFile(allocator: Allocator, path: []const u8) !Self {
     };
 }
 
-pub fn saveToFile(self: *const Self, path: [] const u8, format: Format) !void {
+pub fn saveToFile(self: *const Self, path: []const u8, format: Format) !void {
     const path_Z = try self.allocator.dupeZ(u8, path);
     defer self.allocator.free(path_Z);
 
@@ -70,9 +71,11 @@ pub fn saveToFile(self: *const Self, path: [] const u8, format: Format) !void {
     var sf_file = sndfile.sf_open(path_Z.ptr, sndfile.SFM_WRITE, &sf_info);
     defer _ = sndfile.sf_close(sf_file);
 
-    var quality: f64 = 1;
-    var cmd_resut = sndfile.sf_command(sf_file, sndfile.SFC_SET_VBR_ENCODING_QUALITY, &quality,  @sizeOf(f64));
-    assert(cmd_resut == 1);
+    if (format == .vorbis) {
+        var quality: f64 = 1;
+        var cmd_resut = sndfile.sf_command(sf_file, sndfile.SFC_SET_VBR_ENCODING_QUALITY, &quality, @sizeOf(f64));
+        assert(cmd_resut == 1);
+    }
 
     const frames_per_write = self.sample_rate;
     var write_buffer = try self.allocator.alloc(f32, self.n_channels * frames_per_write);
@@ -87,7 +90,7 @@ pub fn saveToFile(self: *const Self, path: [] const u8, format: Format) !void {
 
             for (0..self.n_channels) |channel_idx| {
                 const write_idx = frame_idx * self.n_channels + channel_idx;
-                
+
                 write_buffer[write_idx] = self.channel_pcm_buf[channel_idx][read_idx];
             }
         }
