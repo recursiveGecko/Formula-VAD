@@ -26,7 +26,7 @@ pub const Config = struct {
     short_term_speech_avg_sec: f32 = 0.2,
     /// Primary trigger for speech when short term avg in denoised speech band is this
     /// many times higher than long term avg
-    speech_threshold_factor: f32 = 22,
+    speech_threshold_factor: f32 = 18,
     /// Secondary trigger that compares volume in L and R channels before denoising
     channel_vol_ratio_avg_sec: f32 = 0.5,
     channel_vol_ratio_threshold: f32 = 0.5,
