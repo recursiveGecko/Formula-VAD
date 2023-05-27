@@ -4,6 +4,7 @@ const Segment = @import("./Segment.zig");
 const SegmentWriter = @import("./SegmentWriter.zig");
 const SplitSlice = @import("../structures/SplitSlice.zig").SplitSlice;
 const AudioBuffer = @import("../audio_utils/AudioBuffer.zig");
+const audio_utils = @import("../audio_utils.zig");
 
 const Self = @This();
 
@@ -80,7 +81,7 @@ pub fn finalize(self: *Self, to_frame: u64, keep: bool) !?AudioBuffer {
 
         const segment = self.segment_writer.segment;
         try self.allocNewWriter();
-        
+
         var audio_buffer = try segmentToAudioBuffer(segment, self.sample_rate);
 
         self.last_recording_end_index = to_frame;
@@ -91,26 +92,51 @@ pub fn finalize(self: *Self, to_frame: u64, keep: bool) !?AudioBuffer {
     }
 }
 
+fn findBestChannel(segment: Segment) usize {
+    var best_channel: usize = 0;
+    var best_channel_vol: f32 = 9999;
+
+    const n_channels = segment.channel_pcm_buf.len;
+
+    for (0..n_channels) |i| {
+        const vol = audio_utils.rmsVolume(segment.channel_pcm_buf[i]);
+        if (vol < best_channel_vol) {
+            best_channel = i;
+            best_channel_vol = vol;
+        }
+    }
+
+    return best_channel;
+}
+
 fn segmentToAudioBuffer(segment: Segment, sample_rate: usize) !AudioBuffer {
     defer segment.allocator.?.free(segment.channel_pcm_buf);
+
+    const best_channel = findBestChannel(segment);
 
     const allocator = segment.allocator.?;
     const n_channels = segment.channel_pcm_buf.len;
 
-    var channel_pcm_buf = try allocator.alloc([]f32, n_channels);
+    var channel_pcm_buf = try allocator.alloc([]f32, 1);
     errdefer allocator.free(channel_pcm_buf);
 
+    channel_pcm_buf[0] = segment.channel_pcm_buf[best_channel].first;
+
+    // Free all other channels
     for (0..n_channels) |i| {
         std.debug.assert(segment.channel_pcm_buf[i].first.len == segment.length);
         std.debug.assert(segment.channel_pcm_buf[i].second.len == 0);
-        channel_pcm_buf[i] = segment.channel_pcm_buf[i].first;
+
+        if (i == best_channel) continue;
+
+        segment.channel_pcm_buf[i].deinit();
     }
 
-    var audio_buffer = AudioBuffer {
+    var audio_buffer = AudioBuffer{
         .allocator = allocator,
         .length = segment.length,
         .sample_rate = sample_rate,
-        .n_channels = n_channels,
+        .n_channels = 1,
         .duration_seconds = @intToFloat(f32, segment.length) / @intToFloat(f32, sample_rate),
         .channel_pcm_buf = channel_pcm_buf,
         .global_start_frame_number = segment.index,
