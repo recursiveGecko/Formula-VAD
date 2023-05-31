@@ -26,4 +26,5 @@ pub fn audioTest(allocator: Allocator) !void {
 test {
     _ = AudioPipeline;
     _ = @import("./structures/MultiRingBuffer.zig");
+    _ = @import("./Evaluator.zig");
 }

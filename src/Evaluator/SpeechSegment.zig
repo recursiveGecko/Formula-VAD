@@ -4,16 +4,15 @@ const ArrayList = std.ArrayList;
 
 const Self = @This();
 
+id: i64 = -1,
 from_sec: f32,
 to_sec: f32,
+side: enum{ vad, ref },
 
-opposite_match_count: usize = 0,
-// TODO: Not implemented
-overlap: ?f32 = null,
-// TODO: Not implemented
-start_delta: ?f32 = null,
-// TODO: Not implemented
-end_delta: ?f32 = null,
+opposite_segments: ?[]*Self = null,
+next: ?*Self = null,
+prev: ?*Self = null,
+late_start_sec: f32 = 0,
 debug_info: ?[]const u8 = null,
 
 pub fn duration(self: Self) f32 {
@@ -28,7 +27,7 @@ pub fn overlapWith(self: Self, other: Self) f32 {
 }
 
 pub fn hasMatch(self: Self) bool {
-    return self.opposite_match_count > 0;
+    return self.opposite_segments.?.len > 0;
 }
 
 pub fn toComment(self: Self, allocator: Allocator) ![]const u8 {
@@ -39,7 +38,7 @@ pub fn toComment(self: Self, allocator: Allocator) ![]const u8 {
     }
 }
 
-pub fn findOverlapping(allocator: Allocator, target: Self, others: []Self) ![]*Self {
+pub fn findOverlapping(allocator: Allocator, target: *Self, others: []Self) ![]*Self {
     var overlapping = ArrayList(*Self).init(allocator);
     errdefer overlapping.deinit();
 
@@ -50,4 +49,9 @@ pub fn findOverlapping(allocator: Allocator, target: Self, others: []Self) ![]*S
     }
 
     return overlapping.toOwnedSlice();
+}
+
+pub fn sortByStart(_ctx: void, lhs: Self, rhs: Self) bool {
+    _ = _ctx;
+    return lhs.from_sec <= rhs.from_sec;
 }

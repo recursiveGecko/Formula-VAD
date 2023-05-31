@@ -26,6 +26,7 @@ pub fn parseAudacitySegments(allocator: Allocator, txt: []const u8) ![]SpeechSeg
         const segment = SpeechSegment{
             .from_sec = from,
             .to_sec = to,
+            .side = .ref,
         };
 
         try segments.append(segment);

@@ -234,6 +234,7 @@ pub fn storeResult(
         );
 
         speech_segments[i] = .{
+            .side = .vad,
             .from_sec = from_sec,
             .to_sec = to_sec,
             .debug_info = debug_info,

@@ -122,11 +122,20 @@ pub fn main() !void {
 
     const stat_config = Evaluator.statistics.StatConfig{
         .ignore_shorter_than_sec = simulation.config.vad_config.vad_machine_config.min_vad_duration_sec,
+        .extrude_start = 5,
+        .extrude_end = 10,
+        .fill_gaps = 5,
     };
 
     const report = try report_generator.bufPrintSimulationReport(allocator, simulation.*, stat_config);
     defer allocator.free(report);
+
     try stdout_w.writeAll(report);
+
+    // Save report
+    var report_path = try std.fs.path.join(allocator, &.{simulation.resolved_out_path.?, "report.txt"});
+    defer allocator.free(report_path);
+    try std.fs.Dir.writeFile(fs.cwd(), report_path, report);
 }
 
 pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {

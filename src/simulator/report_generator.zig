@@ -8,23 +8,23 @@ const AggregateStats = statistics.AggregateStats;
 const StatConfig = statistics.StatConfig;
 
 pub const definitions =
-    \\P   (Positives):                            Total number of real speech segments (from reference labels)
-    \\TP  (True positives):                       Number of correctly detected speech segments
-    \\FP  (False positives):                      Number of incorrectly detected speech segments
-    \\FN  (False negatives):                      Number of missed speech segments
+    \\P   (Positives):                            Total duration of real speech segments (from reference labels)
+    \\TP  (True positives):                       Duration of correctly detected speech segments
+    \\FP  (False positives):                      Duration of incorrectly detected speech segments
+    \\FN  (False negatives):                      Duration of missed speech segments
     \\TPR (True positive rate, sensitivity):      Probability that VAD detects a real speech segment. = TP / P 
     \\FNR (False negative rate, miss rate):       Probability that VAD misses a speech segment.       = FN / P 
     \\PPV (Precision, Positive predictive value): Probability that detected speech segment is true.   = TP / (TP + FP) 
     \\FDR (False discovery rate):                 Probability that detected speech segment is false.  = FP / (TP + FP) 
 ;
 
-pub const table_header_fmt = "| {s: >30} | {s: >3} | {s: >3} | {s: >3} | {s: >3} | {s: >6} | {s: >6} | {s: >6} | {s: >8} |\n";
+pub const table_header_fmt = "| {s: >30} | {s: >4} | {s: >4} | {s: >4} | {s: >4} | {s: >6} | {s: >6} | {s: >6} | {s: >8} |\n";
 pub const table_header_vals = .{ "Name", "P", "TP", "FP", "FN", "TPR", "FNR", "PPV", "FDR (!)" };
 
-pub const table_separator_fmt = "| {s:->30} | {s:->3} | {s:->3} | {s:->3} | {s:->3} | {s:->6} | {s:->6} | {s:->6} | {s:->8} |\n";
+pub const table_separator_fmt = "| {s:->30} | {s:->4} | {s:->4} | {s:->4} | {s:->4} | {s:->6} | {s:->6} | {s:->6} | {s:->8} |\n";
 pub const table_separator_vals = .{ "", "", "", "", "", "", "", "", "" };
 
-pub const table_row_fmt = "| {s: >30} | {d: >3} | {d: >3} | {d: >3} | {d: >3} | {d: >5.1}% | {d: >5.1}% | {d: >5.1}% | {d: >7.1}% |\n";
+pub const table_row_fmt = "| {s: >30} | {d: >4.0} | {d: >4.0} | {d: >4.0} | {d: >4.0} | {d: >5.1}% | {d: >5.1}% | {d: >5.1}% | {d: >7.1}% |\n";
 
 pub fn bufPrintSimulationReport(
     allocator: Allocator,
@@ -45,15 +45,15 @@ pub fn bufPrintSimulationReport(
 
     for (simulation.instances) |instance| {
         if (instance.evaluator) |evaluator| {
-            const stats = statistics.fromEvaluator(evaluator, stat_config);
+            const stats = try statistics.fromEvaluator(evaluator, stat_config);
             try all_stats_list.append(stats);
 
             try writer.print(table_row_fmt, .{
                 instance.name,
-                stats.total_positives,
-                stats.true_positives,
-                stats.false_positives,
-                stats.false_negatives,
+                stats.total_positives_sec,
+                stats.true_positives_sec,
+                stats.false_positives_sec,
+                stats.false_negatives_sec,
                 stats.true_positive_rate * 100,
                 stats.false_negative_rate * 100,
                 stats.precision * 100,
@@ -68,11 +68,11 @@ pub fn bufPrintSimulationReport(
     const agg = statistics.aggregate(all_stats);
 
     try writer.print("\n=> Aggregate stats \n\n", .{});
-    try writer.print("Total speech events    (P): {d: >5}\n", .{agg.total_positives});
-    try writer.print("True positives        (TP): {d: >5}\n", .{agg.true_positives});
-    try writer.print("False positives       (FP): {d: >5}\n", .{agg.false_positives});
-    try writer.print("False negatives       (FN): {d: >5}", .{agg.false_negatives});
-    try writer.print("          Min.    Avg.    Max. \n", .{});
+    try writer.print("Total speech duration  (P): {d: >7.1} sec\n", .{agg.total_positives_sec});
+    try writer.print("True positives        (TP): {d: >7.1} sec\n", .{agg.true_positives_sec});
+    try writer.print("False positives       (FP): {d: >7.1} sec\n", .{agg.false_positives_sec});
+    try writer.print("False negatives       (FN): {d: >7.1} sec", .{agg.false_negatives_sec});
+    try writer.print("    Min.    Avg.    Max. \n", .{});
     try writer.print(
         "True positive rate   (TPR):   {d: >5.1}%  |  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% \n",
         .{
