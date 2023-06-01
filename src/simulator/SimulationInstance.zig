@@ -33,7 +33,7 @@ const PipelineContext = struct {
 
         defer ctx.recording_count += 1;
 
-        const file_name = std.fmt.allocPrint(
+        const audio_file_name = std.fmt.allocPrint(
             allocator,
             "{d:0>3}-{s}.ogg",
             .{ ctx.recording_count, ctx.sim_instance.name },
@@ -41,20 +41,20 @@ const PipelineContext = struct {
             log.err("Failed to allocate file name: {any}", .{err});
             return;
         };
-        defer allocator.free(file_name);
+        defer allocator.free(audio_file_name);
 
-        const path = fs.path.resolve(allocator, &.{ ctx.sim_instance.output_dir.?, file_name }) catch |err| {
+        const audio_path = fs.path.resolve(allocator, &.{ ctx.sim_instance.output_dir.?, audio_file_name }) catch |err| {
             log.err("Failed to allocate file path: {any}", .{err});
             return;
         };
-        defer allocator.free(path);
+        defer allocator.free(audio_path);
 
-        audio_buffer.saveToFile(path, AudioBuffer.Format.vorbis) catch |err| {
+        audio_buffer.saveToFile(audio_path, AudioBuffer.Format.vorbis) catch |err| {
             log.err("Failed to save file to disk: {any}", .{err});
             return;
         };
 
-        log.debug("Saved audio: {s}", .{path});
+        log.debug("Saved audio: {s}", .{audio_path});
     }
 
     pub fn toPipelineCallbacks(self: *Ctx) AudioPipeline.Callbacks {

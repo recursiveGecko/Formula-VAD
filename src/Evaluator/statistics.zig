@@ -193,7 +193,7 @@ pub fn calcFalsePositiveSec(
     vad_segment: SpeechSegment,
     config: StatConfig,
 ) !f32 {
-    std.debug.assert(vad_segment.side == .vad);
+    if (vad_segment.side != .vad) return error.InvalidSegmentSide;
 
     const extruded_ref_matches = try extrudeSegments(alloc, vad_segment.opposite_segments.?, config);
     defer alloc.free(extruded_ref_matches);
@@ -207,7 +207,7 @@ pub fn calcTruePositiveSec(
     vad_segment: SpeechSegment,
     config: StatConfig,
 ) !f32 {
-    std.debug.assert(vad_segment.side == .vad);
+    if (vad_segment.side != .vad) return error.InvalidSegmentSide;
 
     const fp = try calcFalsePositiveSec(alloc, vad_segment, config);
     return vad_segment.duration() - fp;
@@ -218,6 +218,8 @@ pub fn calcFalseNegativeSec(
     ref_segment: SpeechSegment,
     config: StatConfig,
 ) !f32 {
+    if (ref_segment.side != .ref) return error.InvalidSegmentSide;
+
     _ = config;
     _ = alloc;
     const overlap = calcOverlapWithMatches(ref_segment);

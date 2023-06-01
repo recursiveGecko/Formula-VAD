@@ -31,6 +31,8 @@ multi_ring_buffer: MultiRingBuffer(f32, u64),
 recorder: Recorder,
 /// Slice of slices that temporarily holds the samples to be recorded.
 temp_record_slices: []SplitSlice(f32),
+/// End recording after this sample is recorded.
+end_recording_on_sample: ?u64 = null,
 vad: VAD = undefined,
 callbacks: ?Callbacks = null,
 
@@ -129,34 +131,17 @@ pub fn sliceSegment(self: Self, result_segment: *Segment, abs_from: u64, abs_to:
     result_segment.*.length = abs_to - abs_from;
 }
 
-pub fn beginCapture(self: *Self, vad_from_sample: usize) !void {
-    // Add a couple of seconds of buffer to the start of the recording to avoid missing the start
-    const start_buffer = self.config.sample_rate * 2;
-    var actual_start_sample = if (start_buffer > vad_from_sample) 0 else vad_from_sample - start_buffer;
-
-    self.recorder.start(actual_start_sample);
+pub fn beginCapture(self: *Self, from_sample: usize) !void {
+    self.recorder.start(from_sample);
 }
 
-pub fn endCapture(self: *Self, vad_to_sample: usize, keep: bool) !void {
-    // Ensure we're not cutting off mid-speech
-    var actual_end_sample = vad_to_sample + self.config.sample_rate * 2;
-
+pub fn endCapture(self: *Self, to_sample: usize, keep: bool) !void {
     if (keep) {
-        _ = try self.maybeRecordBuffer(actual_end_sample);
-    }
-
-    var maybe_audio_buffer = try self.recorder.finalize(actual_end_sample, keep);
-    if (!keep) return;
-
-    if (maybe_audio_buffer) |*audio_buffer| {
-        defer audio_buffer.deinit();
-
-        const cb_config = self.callbacks orelse return;
-        if (cb_config.on_recording) |cb| {
-            cb(cb_config.ctx, audio_buffer);
-        }
+        self.end_recording_on_sample = to_sample;
+        _ = try self.maybeRecordBuffer(to_sample);
     } else {
-        log.err("Expected to capture segment, but none was returned", .{});
+        self.end_recording_on_sample = null;
+        _ = try self.recorder.finalize(0, false);
     }
 }
 
@@ -174,19 +159,38 @@ fn maybeRunPipeline(self: *Self) !void {
 fn maybeRecordBuffer(self: *Self, to_sample: usize) !bool {
     if (!self.recorder.isRecording()) return false;
 
-    const from_sample = self.recorder.endIndex();
+    const last_written_idx = self.recorder.endIndex();
 
-    if (to_sample <= from_sample) return true;
+    if (to_sample <= last_written_idx) return true;
 
     var record_segment = Segment{
         .allocator = null,
         .channel_pcm_buf = self.temp_record_slices,
-        .index = from_sample,
-        .length = to_sample - from_sample,
+        .index = last_written_idx,
+        .length = to_sample - last_written_idx,
     };
 
-    try self.sliceSegment(&record_segment, from_sample, to_sample);
+    try self.sliceSegment(&record_segment, last_written_idx, to_sample);
     try self.recorder.write(&record_segment);
+
+    const finalize_after = self.end_recording_on_sample;
+
+    if (finalize_after != null and to_sample >= finalize_after.?) {
+        defer self.end_recording_on_sample = null;
+        var maybe_audio_buffer = try self.recorder.finalize(finalize_after.?, true);
+
+        if (maybe_audio_buffer) |*audio_buffer| {
+            defer audio_buffer.deinit();
+
+            const cb_config = self.callbacks orelse return true;
+            if (cb_config.on_recording) |cb| {
+                cb(cb_config.ctx, audio_buffer);
+            }
+        } else {
+            log.err("Expected to capture segment, but none was returned", .{});
+        }
+    }
+
     return true;
 }
 
@@ -208,8 +212,8 @@ test "simple leak test" {
                 .alt_vad_machine_configs = &.{
                     .{},
                     .{},
-                }
-            }
+                },
+            },
         },
         null,
     );

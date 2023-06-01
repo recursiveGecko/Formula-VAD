@@ -190,7 +190,7 @@ pub fn run(
                 self.speech_state = .open;
                 vad_machine_result = .{
                     .recording_state = .started,
-                    .sample_number = self.speech_start_index,
+                    .sample_number = self.getOffsetRecordingStart(self.speech_start_index),
                 };
             } else if (!threshold_met) {
                 self.speech_state = .closed;
@@ -265,8 +265,8 @@ fn onSpeechEnd(self: *Self) !VAD.VADMachineResult {
 
     if (speech_duration_met) {
         const segment = VAD.VADSpeechSegment{
-            .sample_from = sample_from,
-            .sample_to = sample_to,
+            .sample_from = self.getOffsetRecordingStart(sample_from),
+            .sample_to = self.getOffsetRecordingEnd(sample_to),
             .debug_rnn_vad = avg_rnn_vad,
             .debug_avg_speech_vol_ratio = avg_speech_vol_ratio,
         };
@@ -283,7 +283,7 @@ fn onSpeechEnd(self: *Self) !VAD.VADMachineResult {
     if (speech_duration_met) {
         return .{
             .recording_state = .completed,
-            .sample_number = self.speech_end_index,
+            .sample_number = self.getOffsetRecordingEnd(self.speech_end_index),
         };
     } else {
         return .{
@@ -291,4 +291,20 @@ fn onSpeechEnd(self: *Self) !VAD.VADMachineResult {
             .sample_number = 0,
         };
     }
+}
+
+/// Add a couple of seconds of margin to the start of the segment 
+pub fn getOffsetRecordingStart(self: Self, vad_from: u64) u64 {
+    const sample_rate_f = @intToFloat(f32, self.sample_rate);
+    const start_buffer = @floatToInt(usize, sample_rate_f * 2);
+    const record_from = if (start_buffer > vad_from) 0 else vad_from - start_buffer;
+    return record_from;
+}
+
+/// Add a couple of seconds of margin to the end of the segment 
+pub fn getOffsetRecordingEnd(self: Self, vad_to: u64) u64 {
+    const sample_rate_f = @intToFloat(f32, self.sample_rate);
+    const end_buffer = @floatToInt(usize, sample_rate_f * 2);
+    const record_to = vad_to + end_buffer;
+    return record_to;
 }
