@@ -1,5 +1,4 @@
 const std = @import("std");
-const log = std.log.scoped(.vad);
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const Segment = @import("./Segment.zig");

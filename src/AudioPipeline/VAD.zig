@@ -232,13 +232,13 @@ fn stateMachineStep(
 
     switch (vad_result.recording_state) {
         .started => {
-            try self.pipeline.beginCapture(vad_result.sample_number);
+            try self.pipeline.startRecording(vad_result.sample_number);
         },
         .completed => {
-            try self.pipeline.endCapture(vad_result.sample_number, true);
+            try self.pipeline.endRecording(vad_result.sample_number, true);
         },
         .aborted => {
-            try self.pipeline.endCapture(vad_result.sample_number, false);
+            try self.pipeline.endRecording(vad_result.sample_number, false);
         },
         .none => {},
     }
