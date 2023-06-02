@@ -22,5 +22,16 @@
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Build formula-vad.zig"
     },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug - Formula-VAD (Simulator)",
+      "program": "${workspaceFolder}/zig-out/bin/simulator",
+      "args": [
+        "-i", "tmp/plan.json",
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build formula-vad.zig"
+    },
   ]
 }

@@ -2,7 +2,6 @@ const std = @import("std");
 const log = std.log.scoped(.pipeline);
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
-const PipelineFFT = @import("./AudioPipeline/PipelineFFT.zig");
 const Segment = @import("./AudioPipeline/Segment.zig");
 const Recorder = @import("./AudioPipeline/Recorder.zig");
 const SplitSlice = @import("./structures/SplitSlice.zig").SplitSlice;

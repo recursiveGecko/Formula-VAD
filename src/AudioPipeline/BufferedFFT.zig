@@ -6,6 +6,9 @@ const window_fn = @import("../audio_utils/window_fn.zig");
 const AudioPipeline = @import("../AudioPipeline.zig");
 const SplitSlice = @import("../structures/SplitSlice.zig");
 const Segment = @import("./Segment.zig");
+const SegmentWriter = @import("./SegmentWriter.zig");
+const BufferedStep = @import("./BufferedStep.zig");
+const VADMetadata = @import("./VADMetadata.zig");
 
 const Self = @This();
 
@@ -22,17 +25,15 @@ pub const Result = struct {
     index: usize,
     fft_size: usize,
     channel_bins: [][]f32 = undefined,
+    vad_metadata: VADMetadata.Result,
 
     pub fn init(allocator: Allocator, n_channels: usize, fft_size: usize, n_bins: usize) !Result {
         var channel_bins = try allocator.alloc([]f32, n_channels);
         var bins_initialized: usize = 0;
         errdefer {
-            for (0..bins_initialized) |i| {
-                allocator.free(channel_bins[i]);
-            }
+            for (0..bins_initialized) |i| allocator.free(channel_bins[i]);
             allocator.free(channel_bins);
         }
-
         for (0..n_channels) |channel_idx| {
             channel_bins[channel_idx] = try allocator.alloc(f32, n_bins);
             bins_initialized += 1;
@@ -43,6 +44,7 @@ pub const Result = struct {
             .index = 0,
             .fft_size = fft_size,
             .channel_bins = channel_bins,
+            .vad_metadata = .{},
         };
     }
 
@@ -54,14 +56,34 @@ pub const Result = struct {
     }
 };
 
+pub const WriteResult = struct {
+    fft_result: ?Result,
+    n_remaining_input: usize,
+};
+
 allocator: Allocator,
 config: Config,
 fft_instance: FFT,
 window: []const f32,
+buffer: SegmentWriter,
+temp_result: Result,
+vad_metadata: VADMetadata = .{},
 
 pub fn init(allocator: Allocator, config: Config) !Self {
-    var fft_instance_ = try FFT.init(allocator, config.fft_size, config.sample_rate);
-    errdefer fft_instance_.deinit();
+    var fft_instance = try FFT.init(allocator, config.fft_size, config.sample_rate);
+    errdefer fft_instance.deinit();
+
+    var buffer = try SegmentWriter.init(allocator, config.n_channels, config.fft_size);
+    errdefer buffer.deinit();
+    // Pipeline sample number that corresponds to the start of the FFT buffer
+    buffer.segment.index = 0;
+
+    var temp_result = try Result.init(
+        allocator,
+        config.n_channels,
+        config.fft_size,
+        fft_instance.binCount(),
+    );
 
     var window = try allocator.alloc(f32, config.fft_size);
     errdefer allocator.free(window);
@@ -72,7 +94,9 @@ pub fn init(allocator: Allocator, config: Config) !Self {
     var self = Self{
         .allocator = allocator,
         .config = config,
-        .fft_instance = fft_instance_,
+        .buffer = buffer,
+        .temp_result = temp_result,
+        .fft_instance = fft_instance,
         .window = window,
     };
     self.config.hop_size = hop_size;
@@ -83,20 +107,65 @@ pub fn init(allocator: Allocator, config: Config) !Self {
 pub fn deinit(self: *Self) void {
     self.allocator.free(self.window);
     self.fft_instance.deinit();
+    self.buffer.deinit();
+    self.temp_result.deinit();
 }
 
-pub fn fft(self: *Self, segment: Segment, result: *Result) !void {
+pub fn write(
+    self: *Self,
+    input: *const BufferedStep.Result,
+    input_offset: usize,
+) !WriteResult {
+    const n_written = try self.buffer.write(input.segment, input_offset, null);
+    const n_remaining_input = input.segment.length - input_offset - n_written;
+
+    self.vad_metadata.push(
+        input.metadata,
+        n_written,
+    );
+
+    if (!self.buffer.isFull()) {
+        return WriteResult{
+            .fft_result = null,
+            .n_remaining_input = n_remaining_input,
+        };
+    }
+
+    defer self.buffer.reset(input.segment.index + n_written);
+    try self.fft(self.buffer.segment, &self.temp_result);
+
+    self.temp_result.index = self.buffer.segment.index;
+    self.temp_result.vad_metadata = self.vad_metadata.toResult();
+
+    self.vad_metadata = .{};
+    return WriteResult{
+        .fft_result = self.temp_result,
+        .n_remaining_input = n_remaining_input,
+    };
+}
+
+pub fn fft(
+    self: *Self,
+    segment: Segment,
+    result: *Result,
+) !void {
     const channels = segment.channel_pcm_buf;
 
     for (0..channels.len) |channel_idx| {
         const samples = channels[channel_idx];
         try self.fft_instance.fft(samples, self.window, result.channel_bins[channel_idx]);
     }
-    
+
     result.index = segment.index;
 }
 
-pub fn averageVolumeInBand(self: Self, result: Result, min_freq: f32, max_freq: f32, channel_results: []f32) !void {
+pub fn averageVolumeInBand(
+    self: Self,
+    result: *const Result,
+    min_freq: f32,
+    max_freq: f32,
+    channel_results: []f32,
+) !void {
     assert(result.channel_bins.len == channel_results.len);
 
     const min_bin = try self.fft_instance.freqToBin(min_freq);
@@ -104,7 +173,7 @@ pub fn averageVolumeInBand(self: Self, result: Result, min_freq: f32, max_freq: 
 
     for (0..channel_results.len) |chan_idx| {
         channel_results[chan_idx] = 0.0;
-     
+
         for (min_bin..max_bin + 1) |i| {
             channel_results[chan_idx] += result.channel_bins[chan_idx][i];
         }

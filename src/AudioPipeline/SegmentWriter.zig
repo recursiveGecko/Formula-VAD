@@ -21,6 +21,8 @@ pub fn init(
     var segment = try Segment.initWithCapacity(allocator, n_channels, length);
     errdefer segment.deinit();
 
+    segment.index = 0;
+
     var self = Self{
         .allocator = allocator,
         .segment = segment,
@@ -31,6 +33,10 @@ pub fn init(
 
 pub fn deinit(self: *Self) void {
     self.segment.deinit();
+}
+
+pub fn isFull(self: *Self) bool {
+    return self.write_index == self.segment.length;
 }
 
 /// Writes the given segment to the buffer, returning the number of samples written.

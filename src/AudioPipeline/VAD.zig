@@ -2,7 +2,7 @@ const std = @import("std");
 const log = std.log.scoped(.vad);
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
-const PipelineFFT = @import("./PipelineFFT.zig");
+const BufferedFFT = @import("./BufferedFFT.zig");
 const window_fn = @import("../audio_utils/window_fn.zig");
 const AudioPipeline = @import("../AudioPipeline.zig");
 const Denoiser = @import("../Denoiser.zig");
@@ -10,6 +10,10 @@ const SplitSlice = @import("../structures/SplitSlice.zig").SplitSlice;
 const Segment = @import("./Segment.zig");
 const SegmentWriter = @import("./SegmentWriter.zig");
 const VADMachine = @import("./VADMachine.zig");
+const VADMetadata = @import("./VADMetadata.zig");
+const BufferedVolumeAnalyzer = @import("./BufferedVolumeAnalyzer.zig");
+const BufferedDenoiser = @import("./BufferedDenoiser.zig");
+const BufferedStep = @import("./BufferedStep.zig");
 const audio_utils = @import("../audio_utils.zig");
 
 const Self = @This();
@@ -41,55 +45,18 @@ pub const VADMachineResult = struct {
     sample_number: u64,
 };
 
-const PreAnalysis = struct {
-    volume_ratio: f32,
-};
-
-pub const AnalyzedSegment = struct {
-    input_segment: ?*const Segment = null,
-    segment: Segment,
-    vad: ?f32 = null,
-    volume_ratio: f32,
-
-    pub fn init(allocator: Allocator, length: usize, n_channels: usize) !@This() {
-        var segment = try Segment.initWithCapacity(allocator, n_channels, length);
-
-        return @This(){
-            .segment = segment,
-            .vad = undefined,
-            .volume_ratio = undefined,
-        };
-    }
-
-    pub fn deinit(self: *@This()) void {
-        self.segment.deinit();
-    }
-};
-
 allocator: Allocator,
 pipeline: *AudioPipeline,
 config: Config,
 sample_rate: usize,
 n_channels: usize,
-/// Holds Denoiser/RNNoise state
-denoiser: Denoiser,
 /// Number of samples VAD has read from the pipeline
 pipeline_read_count: u64 = 0,
-/// Stores a temporary slice (pointer) of the pipeline that's ready for preprocessing
+/// Temporarily stores slices of pipeline audio data
 temp_input_segment: Segment,
-/// Stores an audio segment with metadata that is being preprocessed (e.g. denoised)
-temp_denoiser_segment: AnalyzedSegment,
-/// Buffer in front of FFT step, forming segments that are `fft_size` samples long
-fft_input_buffer: SegmentWriter,
-/// Stores RNNoise VAD for segments that are being buffered for FFT
-temp_fft_buffer_rnn_vad: f32 = 0,
-temp_fft_buffer_vol_ratio: f32 = 0,
-/// FFT wrapper for the pipeline that holds the FFT state,
-/// our chosen window function, and that can process multiple
-/// channels of audio data at once (operating on Segments)
-pipeline_fft: PipelineFFT,
-/// Temporarily stores the FFT result
-temp_pipeline_fft_result: PipelineFFT.Result,
+buffered_volume_analyzer: BufferedVolumeAnalyzer,
+buffered_denoiser: BufferedDenoiser,
+buffered_fft: BufferedFFT,
 // Speech state machine
 vad_machine: VADMachine,
 alt_vad_machines: ?[]VADMachine,
@@ -105,9 +72,6 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
 
     var allocator = pipeline.allocator;
 
-    var denoiser = try Denoiser.init(allocator);
-    errdefer denoiser.deinit();
-
     var temp_input_segment = Segment{
         .channel_pcm_buf = try allocator.alloc(SplitSlice(f32), n_channels),
         .allocator = allocator,
@@ -122,33 +86,19 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
         };
     }
 
-    var temp_denoiser_segment = try AnalyzedSegment.init(
-        allocator,
-        pipelineReadSize(config),
-        n_channels,
-    );
-    errdefer temp_denoiser_segment.deinit();
+    var buffered_volume_analyzer = try BufferedVolumeAnalyzer.init(allocator);
+    errdefer buffered_volume_analyzer.deinit();
 
-    var fft_input_buffer = try SegmentWriter.init(allocator, n_channels, config.fft_size);
-    errdefer fft_input_buffer.deinit();
-    // Pipeline sample number that corresponds to the start of the FFT buffer
-    fft_input_buffer.segment.index = 0;
+    var buffered_denoiser = try BufferedDenoiser.init(allocator, n_channels);
+    errdefer buffered_denoiser.deinit();
 
-    var pipeline_fft = try PipelineFFT.init(allocator, .{
+    var buffered_fft = try BufferedFFT.init(allocator, .{
         .n_channels = n_channels,
         .fft_size = config.fft_size,
         .hop_size = config.fft_size,
         .sample_rate = sample_rate,
     });
-    errdefer pipeline_fft.deinit();
-
-    var temp_pipeline_fft_result = try PipelineFFT.Result.init(
-        allocator,
-        n_channels,
-        config.fft_size,
-        pipeline_fft.fft_instance.binCount(),
-    );
-    errdefer temp_pipeline_fft_result.deinit();
+    errdefer buffered_fft.deinit();
 
     var self = Self{
         .allocator = allocator,
@@ -156,12 +106,10 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
         .config = config,
         .n_channels = n_channels,
         .sample_rate = sample_rate,
-        .denoiser = denoiser,
         .temp_input_segment = temp_input_segment,
-        .temp_denoiser_segment = temp_denoiser_segment,
-        .fft_input_buffer = fft_input_buffer,
-        .pipeline_fft = pipeline_fft,
-        .temp_pipeline_fft_result = temp_pipeline_fft_result,
+        .buffered_volume_analyzer = buffered_volume_analyzer,
+        .buffered_denoiser = buffered_denoiser,
+        .buffered_fft = buffered_fft,
         .vad_machine = undefined,
         .alt_vad_machines = null,
     };
@@ -191,12 +139,10 @@ pub fn deinit(self: *Self) void {
         self.allocator.free(alt_vad);
     }
     self.vad_machine.deinit();
-    self.denoiser.deinit();
     self.temp_input_segment.deinit();
-    self.temp_denoiser_segment.deinit();
-    self.fft_input_buffer.deinit();
-    self.pipeline_fft.deinit();
-    self.temp_pipeline_fft_result.deinit();
+    self.buffered_volume_analyzer.deinit();
+    self.buffered_denoiser.deinit();
+    self.buffered_fft.deinit();
 }
 
 pub fn run(self: *Self) !void {
@@ -225,139 +171,64 @@ fn collectInputStep(self: *Self) !void {
         var input_segment: *Segment = &self.temp_input_segment;
         try self.pipeline.sliceSegment(input_segment, from, to);
 
-        const pre_analysis = preAnalyzeSegment(input_segment);
+        const input_step_result = BufferedStep.Result{
+            .segment = input_segment,
+            .metadata = .{},
+        };
+        var analyzed_step_result = self.buffered_volume_analyzer.write(&input_step_result);
 
         if (self.config.use_denoiser) {
-            // Use pre-allocated segment which contains the right segment length
-            // for denoising
-            var prep_segment: *AnalyzedSegment = &self.temp_denoiser_segment;
-            prep_segment.input_segment = input_segment;
-            prep_segment.vad = null;
-            prep_segment.volume_ratio = pre_analysis.volume_ratio;
-            prep_segment.segment.index = input_segment.index;
-            try self.denoiserStep(prep_segment);
+            try self.denoiserStep(&analyzed_step_result);
         } else {
-            // We don't need to allocate any memory for `.segment` because
-            // we're simply passing the input segment through
-            var prep_segment = AnalyzedSegment{
-                .input_segment = input_segment,
-                .segment = input_segment.*,
-                .vad = null,
-                .volume_ratio = pre_analysis.volume_ratio,
-            };
-            try self.fftStep(&prep_segment);
+            try self.fftStep(&analyzed_step_result);
         }
     }
-}
-
-fn preAnalyzeSegment(input_segment: *const Segment) PreAnalysis {
-    const n_channels = input_segment.channel_pcm_buf.len;
-
-    // Find the volume ratio between channels
-    var vol_min: f32 = 1;
-    var vol_max: f32 = 0;
-    for (0..n_channels) |channel_idx| {
-        var channel_slice = input_segment.channel_pcm_buf[channel_idx];
-        var vol = audio_utils.rmsVolume(channel_slice);
-
-        if (vol < vol_min) vol_min = vol;
-        if (vol > vol_max) vol_max = vol;
-    }
-
-    const vol_ratio: f32 = if (vol_max == 0) 0 else vol_min / vol_max;
-
-    return PreAnalysis{
-        .volume_ratio = vol_ratio,
-    };
 }
 
 fn denoiserStep(
     self: *Self,
-    prep_segment: *AnalyzedSegment,
+    input: *const BufferedStep.Result,
 ) !void {
-    const n_channels = prep_segment.segment.channel_pcm_buf.len;
+    var input_offset: usize = 0;
+    while (true) {
+        var denoised_result = try self.buffered_denoiser.write(input, input_offset);
 
-    var input_segment: *const Segment = prep_segment.input_segment.?;
-    var denoised_segment: *Segment = &prep_segment.segment;
+        if (denoised_result.denoised_segment == null) return;
 
-    // We will use the lowest RNNoise VAD of all channels
-    var vad_low: f32 = 1;
-    for (0..n_channels) |channel_idx| {
-        var channel_pcm = input_segment.channel_pcm_buf[channel_idx];
-        var result_pcm = denoised_segment.channel_pcm_buf[channel_idx].first;
+        var fft_input = BufferedStep.Result{
+            .segment = denoised_result.denoised_segment.?,
+            .metadata = denoised_result.metadata.?,
+        };
+        try self.fftStep(&fft_input);
 
-        const vad = try self.denoiser.denoise(channel_pcm, @constCast(result_pcm));
-        if (vad < vad_low) vad_low = vad;
+        if (denoised_result.n_remaining_input == 0) return;
+        input_offset = input.segment.length - denoised_result.n_remaining_input;
     }
-
-    prep_segment.vad = vad_low;
-
-    try self.fftBufferStep(prep_segment);
 }
 
-fn fftBufferStep(
+fn fftStep(
     self: *Self,
-    prep_segment: *const AnalyzedSegment,
+    input: *const BufferedStep.Result,
 ) !void {
-    var fft_buffer = &self.fft_input_buffer;
-    const fft_buffer_len = fft_buffer.segment.length;
-
-    const fft_buf_segment: *const Segment = &prep_segment.segment;
-
     // Denoiser segment could be larger than the FFT buffer (depending on FFT size)
     // So we might have to split it into multiple FFT buffer writes
-    var denoised_buf_offset: usize = 0;
+    var input_offset: usize = 0;
     while (true) {
-        const written = try fft_buffer.write(fft_buf_segment, denoised_buf_offset, null);
-        denoised_buf_offset += written;
-        std.debug.assert(denoised_buf_offset <= fft_buf_segment.length);
+        const result = try self.buffered_fft.write(input, input_offset);
+        if (result.fft_result == null) return;
 
-        const fft_buffer_is_full = fft_buffer.write_index == fft_buffer_len;
+        try self.stateMachineStep(&result.fft_result.?);
 
-        // Keep track of the average RNNoise VAD value for the samples
-        // going into the FFT buffer
-        const current_segment_share = @intToFloat(f32, written) / @intToFloat(f32, fft_buffer_len);
-
-        // if denoiser was bypassed, we don't have a VAD value
-        if (prep_segment.vad) |vad_val| {
-            self.temp_fft_buffer_rnn_vad += vad_val * current_segment_share;
-        }
-        self.temp_fft_buffer_vol_ratio += prep_segment.volume_ratio * current_segment_share;
-
-        if (fft_buffer_is_full) {
-            var fft_input = AnalyzedSegment{
-                .segment = fft_buffer.segment,
-                .vad = if (prep_segment.vad) |rnn_vad| rnn_vad else null,
-                .volume_ratio = self.temp_fft_buffer_vol_ratio,
-            };
-
-            try self.fftStep(&fft_input);
-
-            // Global index of the first sample in the next segment
-            const next_fft_buffer_index = fft_input.segment.index + fft_buffer.segment.length;
-            fft_buffer.reset(next_fft_buffer_index);
-            self.temp_fft_buffer_rnn_vad = 0;
-            self.temp_fft_buffer_vol_ratio = 0;
-        }
-
-        // We have written the entirety of the source segment
-        if (denoised_buf_offset == fft_buf_segment.length) {
-            break;
-        }
+        if (result.n_remaining_input == 0) return;
+        input_offset = input.segment.length - result.n_remaining_input;
     }
-}
-
-fn fftStep(self: *Self, fft_input: *const AnalyzedSegment) !void {
-    try self.pipeline_fft.fft(fft_input.segment, &self.temp_pipeline_fft_result);
-    try self.stateMachineStep(fft_input, &self.temp_pipeline_fft_result);
 }
 
 fn stateMachineStep(
     self: *Self,
-    fft_input: *const AnalyzedSegment,
-    fft_result: *const PipelineFFT.Result,
+    fft_step_result: *const BufferedFFT.Result,
 ) !void {
-    const vad_result = try self.vad_machine.run(fft_input, fft_result);
+    const vad_result = try self.vad_machine.run(fft_step_result);
 
     switch (vad_result.recording_state) {
         .started => {
@@ -375,7 +246,7 @@ fn stateMachineStep(
     // Run the VAD machines for the alternative VADs (training)
     if (self.alt_vad_machines) |alt_vads| {
         for (alt_vads) |*alt_vad| {
-            _ = try alt_vad.run(fft_input, &self.temp_pipeline_fft_result);
+            _ = try alt_vad.run(fft_step_result);
         }
     }
 }

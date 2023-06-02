@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const RollingAverage = @import("../structures/RollingAverage.zig");
 const VAD = @import("./VAD.zig");
-const PipelineFFT = @import("./PipelineFFT.zig");
+const BufferedFFT = @import("./BufferedFFT.zig");
 
 const Self = @This();
 
@@ -43,7 +43,7 @@ sample_rate: usize,
 n_channels: usize,
 config: Config,
 // "Read only" access to FFT pipeline for calculating volume in speech band
-pipeline_fft: PipelineFFT,
+buffered_fft: BufferedFFT,
 speech_state: SpeechState = .closed,
 long_term_speech_volume: RollingAverage,
 short_term_speech_volume: RollingAverage,
@@ -102,7 +102,7 @@ pub fn init(allocator: Allocator, config: Config, vad: VAD) !Self {
     var self = Self{
         .allocator = allocator,
         .config = config,
-        .pipeline_fft = vad.pipeline_fft,
+        .buffered_fft = vad.buffered_fft,
         .sample_rate = sample_rate,
         .n_channels = n_channels,
         .long_term_speech_volume = long_term_speech_avg,
@@ -125,15 +125,14 @@ pub fn deinit(self: *Self) void {
 
 pub fn run(
     self: *Self,
-    fft_input: *const VAD.AnalyzedSegment,
-    fft_result: *const PipelineFFT.Result,
+    fft_result: *const BufferedFFT.Result,
 ) !VAD.VADMachineResult {
     const sample_rate_f = @intToFloat(f32, self.sample_rate);
     const config = self.config;
 
     // Find the average volume in the speech band
-    try self.pipeline_fft.averageVolumeInBand(
-        fft_result.*,
+    try self.buffered_fft.averageVolumeInBand(
+        fft_result,
         config.speech_min_freq,
         config.speech_max_freq,
         self.temp_channel_volumes,
@@ -153,7 +152,7 @@ pub fn run(
 
     // Use the minimum for activation as it's likely the one containing less engine noise, and therefore more accurate
     const short_term = self.short_term_speech_volume.push(min_volume);
-    const channel_vol_ratio = self.channel_vol_ratio.push(fft_input.volume_ratio);
+    const channel_vol_ratio = self.channel_vol_ratio.push(fft_result.vad_metadata.volume_ratio orelse 0);
 
     const threshold_base = self.long_term_speech_volume.last_avg orelse config.initial_long_term_avg orelse short_term;
     const threshold = threshold_base * config.speech_threshold_factor;
@@ -180,7 +179,7 @@ pub fn run(
                 self.speech_start_index = fft_result.index;
             }
 
-            self.trackSpeechStats(fft_input, .closed, self.speech_state);
+            self.trackSpeechStats(fft_result, .closed, self.speech_state);
         },
         .opening => {
             const samples_since_opening = fft_result.index - self.speech_start_index;
@@ -196,7 +195,7 @@ pub fn run(
                 self.speech_state = .closed;
             }
 
-            self.trackSpeechStats(fft_input, .opening, self.speech_state);
+            self.trackSpeechStats(fft_result, .opening, self.speech_state);
         },
         .open => {
             if (!threshold_met) {
@@ -204,7 +203,7 @@ pub fn run(
                 self.speech_end_index = fft_result.index;
             }
 
-            self.trackSpeechStats(fft_input, .open, self.speech_state);
+            self.trackSpeechStats(fft_result, .open, self.speech_state);
         },
         .closing => {
             const samples_since_closing = fft_result.index - self.speech_end_index;
@@ -217,7 +216,7 @@ pub fn run(
                 vad_machine_result = try self.onSpeechEnd();
             }
 
-            self.trackSpeechStats(fft_input, .closing, self.speech_state);
+            self.trackSpeechStats(fft_result, .closing, self.speech_state);
         },
     }
 
@@ -232,19 +231,19 @@ pub fn run(
 /// Track RNNoise's own VAD score during speech segments
 fn trackSpeechStats(
     self: *Self,
-    fft_input: *const VAD.AnalyzedSegment,
+    fft_result: *const BufferedFFT.Result,
     from_state: SpeechState,
     to_state: SpeechState,
 ) void {
     if (from_state == .closed and to_state == .opening) {
-        self.speech_rnn_vad = fft_input.vad orelse 0;
+        self.speech_rnn_vad = fft_result.vad_metadata.rnn_vad orelse 0;
         self.speech_rnn_vad_count = 1;
-        self.speech_vol_ratio = fft_input.volume_ratio;
+        self.speech_vol_ratio = fft_result.vad_metadata.volume_ratio orelse 0;
         self.speech_vol_ratio_count = 1;
     } else if (from_state == .opening or from_state == .open) {
-        self.speech_rnn_vad += fft_input.vad orelse 0;
+        self.speech_rnn_vad += fft_result.vad_metadata.rnn_vad orelse 0;
         self.speech_rnn_vad_count += 1;
-        self.speech_vol_ratio += fft_input.volume_ratio;
+        self.speech_vol_ratio += fft_result.vad_metadata.volume_ratio orelse 0;
         self.speech_vol_ratio_count += 1;
     }
 }
