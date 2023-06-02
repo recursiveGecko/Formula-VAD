@@ -160,7 +160,7 @@ fn pipelineReadSize(config: Config) usize {
 fn collectInputStep(self: *Self) !void {
     const frame_size = pipelineReadSize(self.config);
     const p = self.pipeline;
-    const p_total_write_count = p.multi_ring_buffer.total_write_count;
+    const p_total_write_count = p.totalWriteCount();
 
     // While there are enough input samples to form a RNNoise frame
     while (p_total_write_count - self.pipeline_read_count >= frame_size) {
@@ -199,6 +199,8 @@ fn denoiserStep(
             .segment = denoised_result.denoised_segment.?,
             .metadata = denoised_result.metadata.?,
         };
+        
+        try self.pipeline.pushDenoisedSamples(denoised_result.denoised_segment.?);
         try self.fftStep(&fft_input);
 
         if (denoised_result.n_remaining_input == 0) return;

@@ -1,3 +1,15 @@
+//! MRBRecorder (Multi Ring Buffer Recorder) is responsible for
+//! correctly recording audio from a MultiRingBuffer as
+//! new samples are written to it, ensuring that samples
+//! are not overwritten before they are recorded.
+//! 
+//! It also allows for recording to be stopped at a future sample index,
+//! at which point the recording is automatically finalized.
+//! 
+//! After recording is finalized, MRBRecorder calls the provided callback,
+//! passing it the recorded audio as an AudioBuffer which the CALLEE
+//! must deinit/free.
+//! 
 const std = @import("std");
 const log = std.log.scoped(.mrb_recorder);
 const assert = std.debug.assert;
@@ -67,9 +79,12 @@ pub fn startRecording(self: *Self, from_sample: u64) !void {
 
 pub fn stopRecording(self: *Self, to_sample: u64, keep: bool) !void {
     if (keep) {
+        // Schedule the recording to be finalized after we record the specified sample index.
         self.end_recording_on_sample = to_sample;
+        // Try to finalize the recording now, in case we already have the samples we need.
         try self.maybeFinalizeRecording();
     } else {
+        // Stop recording immediately and discard the recording.
         self.end_recording_on_sample = null;
         _ = try self.recorder.finalize(to_sample, false);
     }
@@ -98,6 +113,7 @@ pub fn recordBeforeMRBWrite(self: *Self, n_samples_to_write: usize) !void {
     try self.maybeRecordBuffer(record_until_sample);
 }
 
+/// Tries to record samples up to the specified sample index (if they are available).
 fn maybeRecordBuffer(self: *Self, suggested_to_idx: usize) !void {
     if (!self.recorder.isRecording()) return;
 
@@ -128,6 +144,8 @@ fn maybeRecordBuffer(self: *Self, suggested_to_idx: usize) !void {
     try self.recorder.write(&record_segment);
 }
 
+/// Tries to finalize the recording if we have the samples we need, 
+/// tries to record the missing samples otherwise.
 fn maybeFinalizeRecording(self: *Self) !void {
     // If we're not recording, or not in the process of finalizing, there's nothing to do.
     if (!self.recorder.isRecording()) return;
@@ -146,7 +164,9 @@ fn maybeFinalizeRecording(self: *Self) !void {
     // there's nothing to do yet.
     if (last_recorded_idx < finalize_after_idx) return;
 
-    defer self.end_recording_on_sample = null;
+    self.end_recording_on_sample = null;
+
+    // Finalize the recording and call the callback with the recorded audio buffer.
     var maybe_audio_buffer = try self.recorder.finalize(finalize_after_idx, true);
 
     if (maybe_audio_buffer) |*audio_buffer| {

@@ -47,19 +47,34 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
         }
 
         /// Writes multiple channels of data to the ring buffer.
-        /// Operations which would overflow the ring buffer are split into multiple steps.
+        ///
+        /// Note that this function does nothing to stop the caller from supplying enough data to
+        /// overwrite every element multiple times (i.e. overflow)
+        /// It is up to the caller to ensure that an appropriate `max_write_count` is supplied
+        /// that allows the caller to process the data after every write operation.
         pub fn write(
             self: *Self,
             source_channels: []const []const TData,
             src_read_offset: usize,
             max_write_count: usize,
         ) usize {
+            // Given the source read offset and maximum number of elements to write,
+            // calculate the maximum element index that we can read from the source buffer
             const max_src_read_idx = src_read_offset + max_write_count;
 
+            // Operations which would overflow the ring buffer are split into multiple steps.
             var n_written: usize = 0;
             while (true) {
+                // Source offset for this step/iteration
                 const step_src_offset = src_read_offset + n_written;
-                var step_max_write_count = @min(self.capacity, max_src_read_idx - step_src_offset);
+                // This can be more that the actual number of elements
+                // that remain in the source buffer, but that's fine.
+                // This simply determines the upper bound.
+                const remaining_readable = max_src_read_idx - step_src_offset;
+                const step_max_write_count = @min(
+                    self.capacity,
+                    remaining_readable,
+                );
 
                 const n_step = self.writeAssumeCapacity(source_channels, step_src_offset, step_max_write_count);
                 n_written += n_step;

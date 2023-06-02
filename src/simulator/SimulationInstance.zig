@@ -25,25 +25,38 @@ const PipelineContext = struct {
     sim_instance: *SimulationInstance,
     recording_count: usize = 0,
 
-    pub fn onRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
-        const ctx = castToSelf(opaque_ctx);
-        const allocator = ctx.sim_instance.main_thread_allocator;
+    pub fn onOriginalRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
+        const self = castToSelf(opaque_ctx);
+        self.onRecording(audio_buffer, .original);
+    }
 
-        if (ctx.sim_instance.output_dir == null) return;
+    pub fn onDenoisedRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
+        const self = castToSelf(opaque_ctx);
+        self.onRecording(audio_buffer, .denoised);
+    }
 
-        defer ctx.recording_count += 1;
+    pub fn onRecording(
+        self: *Ctx,
+        audio_buffer: *const AudioBuffer,
+        rec_type: enum { original, denoised },
+    ) void {
+        const allocator = self.sim_instance.main_thread_allocator;
+
+        if (self.sim_instance.output_dir == null) return;
+
+        defer self.recording_count += 1;
 
         const audio_file_name = std.fmt.allocPrint(
             allocator,
-            "{d:0>3}-{s}.ogg",
-            .{ ctx.recording_count, ctx.sim_instance.name },
+            "{d:0>3}-{s}-{s}.ogg",
+            .{ self.recording_count, self.sim_instance.name, @tagName(rec_type) },
         ) catch |err| {
             log.err("Failed to allocate file name: {any}", .{err});
             return;
         };
         defer allocator.free(audio_file_name);
 
-        const audio_path = fs.path.resolve(allocator, &.{ ctx.sim_instance.output_dir.?, audio_file_name }) catch |err| {
+        const audio_path = fs.path.resolve(allocator, &.{ self.sim_instance.output_dir.?, audio_file_name }) catch |err| {
             log.err("Failed to allocate file path: {any}", .{err});
             return;
         };
@@ -60,7 +73,8 @@ const PipelineContext = struct {
     pub fn toPipelineCallbacks(self: *Ctx) AudioPipeline.Callbacks {
         return AudioPipeline.Callbacks{
             .ctx = self,
-            .on_recording = &Ctx.onRecording,
+            .on_original_recording = &Ctx.onOriginalRecording,
+            .on_denoised_recording = &Ctx.onDenoisedRecording,
         };
     }
 
