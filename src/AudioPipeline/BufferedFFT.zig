@@ -63,14 +63,21 @@ pub const WriteResult = struct {
 
 allocator: Allocator,
 config: Config,
-fft_instance: FFT,
+fft_instance: *FFT,
 window: []const f32,
 buffer: SegmentWriter,
 temp_result: Result,
 vad_metadata: VADMetadata = .{},
+norm_factor: f32,
+complex_buffer: []FFT.Complex,
 
 pub fn init(allocator: Allocator, config: Config) !Self {
-    var fft_instance = try FFT.init(allocator, config.fft_size, config.sample_rate);
+    var fft_instance = try FFT.init(
+        allocator,
+        config.fft_size,
+        config.sample_rate,
+        false,
+    );
     errdefer fft_instance.deinit();
 
     var buffer = try SegmentWriter.init(allocator, config.n_channels, config.fft_size);
@@ -89,6 +96,11 @@ pub fn init(allocator: Allocator, config: Config) !Self {
     errdefer allocator.free(window);
     window_fn.hannWindowPeriodic(window);
 
+    const norm_factor = window_fn.windowNormFactor(window) / @intToFloat(f32, config.fft_size);
+
+    var complex_buffer = try allocator.alloc(FFT.Complex, fft_instance.binCount());
+    errdefer allocator.free(complex_buffer);
+
     const hop_size = if (config.hop_size > 0) config.hop_size else config.fft_size;
 
     var self = Self{
@@ -98,6 +110,8 @@ pub fn init(allocator: Allocator, config: Config) !Self {
         .temp_result = temp_result,
         .fft_instance = fft_instance,
         .window = window,
+        .complex_buffer = complex_buffer,
+        .norm_factor = norm_factor,
     };
     self.config.hop_size = hop_size;
 
@@ -106,6 +120,7 @@ pub fn init(allocator: Allocator, config: Config) !Self {
 
 pub fn deinit(self: *Self) void {
     self.allocator.free(self.window);
+    self.allocator.free(self.complex_buffer);
     self.fft_instance.deinit();
     self.buffer.deinit();
     self.temp_result.deinit();
@@ -153,7 +168,13 @@ pub fn fft(
 
     for (0..channels.len) |channel_idx| {
         const samples = channels[channel_idx];
-        try self.fft_instance.fft(samples, self.window, result.channel_bins[channel_idx]);
+        const result_bins = result.channel_bins[channel_idx];
+
+        try self.fft_instance.fft(samples, self.window, self.complex_buffer);
+
+        for (0..result_bins.len) |i| {
+            result_bins[i] = self.complex_buffer[i].abs() * self.norm_factor;
+        }
     }
 
     result.index = segment.index;

@@ -1,4 +1,5 @@
 const std = @import("std");
+const onnx = @import("lib/onnxruntime.zig/build.zig");
 
 const KV = struct {
     @"0": []const u8,
@@ -35,9 +36,9 @@ pub fn linkPackage(
     });
 
     exe.addModule("formula_vad", pkg);
-    try addRnnoise(b, exe, common_options);
     try addKissFFT(b, exe, common_options);
     try addSndfile(b, exe, common_options);
+    try addOnnx(b, exe, common_options);
 }
 
 pub fn build(b: *std.Build) !void {
@@ -65,7 +66,7 @@ pub fn build(b: *std.Build) !void {
     try addClap(b, exe, common_options);
     try addSndfile(b, exe, common_options);
     try addKissFFT(b, exe, common_options);
-    try addRnnoise(b, exe, common_options);
+    try addOnnx(b, exe, common_options);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -88,7 +89,7 @@ pub fn build(b: *std.Build) !void {
     });
     // try addZigGameDev(b, unit_tests, common_options);
     try addKissFFT(b, unit_tests, common_options);
-    try addRnnoise(b, unit_tests, common_options);
+    try addOnnx(b, unit_tests, common_options);
 
     b.installArtifact(unit_tests);
 
@@ -128,7 +129,7 @@ pub fn build(b: *std.Build) !void {
     try addClap(b, simulator_exe, common_options);
     try addSndfile(b, simulator_exe, common_options);
     try addKissFFT(b, simulator_exe, common_options);
-    try addRnnoise(b, simulator_exe, common_options);
+    try addOnnx(b, simulator_exe, common_options);
     b.installArtifact(simulator_exe);
 
     const simulator_run_cmd = b.addRunArtifact(simulator_exe);
@@ -176,36 +177,6 @@ fn addKissFFT(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOption
     exe.linkLibrary(kiss_fft_lib.?);
 }
 
-var rnnoiseLib: ?*std.Build.Step.Compile = null;
-fn addRnnoise(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
-    if (rnnoiseLib == null) {
-        const dir = thisFileDir() ++ "/lib/rnnoise/src";
-        const rnnSources = try prefixedPaths(b.allocator, dir, &.{
-            "denoise.c",
-            "celt_lpc.c",
-            "kiss_fft.c",
-            "pitch.c",
-            "rnn_data.c",
-            "rnn_reader.c",
-            "rnn.c",
-        });
-
-        var lib = b.addStaticLibrary(.{
-            .name = "rnnoise",
-            .target = options.target,
-            .optimize = options.optimize,
-        });
-        lib.addCSourceFiles(rnnSources, &.{});
-        lib.linkLibC();
-        lib.addIncludePath(thisFileDir() ++ "/lib/rnnoise/include");
-
-        rnnoiseLib = lib;
-    }
-
-    exe.linkLibrary(rnnoiseLib.?);
-    exe.addIncludePath(thisFileDir() ++ "/lib/rnnoise/include");
-}
-
 fn addSndfile(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
     _ = options;
     _ = b;
@@ -222,6 +193,13 @@ fn addClap(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) 
     }
 
     exe.addModule("clap", clap_module.?);
+}
+
+fn addOnnx(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
+    try onnx.linkPackage(b, exe, .{
+        .target = options.target,
+        .optimize = options.optimize,
+    });
 }
 
 fn prefixedPaths(allocator: std.mem.Allocator, prefix: []const u8, paths: []const []const u8) ![][]const u8 {

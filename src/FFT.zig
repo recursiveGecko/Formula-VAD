@@ -7,8 +7,16 @@ const kissfft = @cImport({
     @cInclude("kiss_fft.h");
     @cInclude("kiss_fftr.h");
 });
-const window_fn = @import("./audio_utils/window_fn.zig");
 const SplitSlice = @import("./structures/SplitSlice.zig").SplitSlice;
+
+pub const Complex = extern struct {
+    r: f32,
+    i: f32,
+
+    pub fn abs(self: @This()) f32 {
+        return @sqrt(self.r * self.r + self.i * self.i);
+    }
+};
 
 const Self = @This();
 
@@ -16,59 +24,71 @@ const Self = @This();
 // Struct fields
 // =============
 allocator: Allocator,
-// kiss_fftr_cfg is a C pointer
-kiss_cfg: kissfft.kiss_fftr_cfg,
-kiss_state_raw: []align(8) u8,
-f_in: []f32,
-f_out: []kissfft.kiss_fft_cpx,
+kiss_cfg: kissfft.kiss_fftr_cfg = null,
+buf_real: []f32,
+buf_cpx: []kissfft.kiss_fft_cpx,
 n_fft: usize,
 sample_rate: usize,
+mode_inverse: bool,
 
 /// Initialize a new reusable FFT instance for given FFT size and sample rate.
-pub fn init(allocator: Allocator, n_fft: usize, sample_rate: usize) !Self {
+pub fn init(
+    allocator: Allocator,
+    n_fft: usize,
+    sample_rate: usize,
+    mode_inverse: bool,
+) !*Self {
     if (n_fft == 0 or @mod(n_fft, 2) != 0) {
         return error.InvalidFFTSize;
     }
 
-    const state_size_needed = kissfftSizeNeeded(n_fft);
-
-    // Allocate KissFFT state
-    const kiss_state_raw = try allocator.alignedAlloc(u8, 8, state_size_needed);
-    errdefer allocator.free(kiss_state_raw);
-
-    // KissFFT is going to store the state at the beginning of our allocated buffer
-    const kiss_cfg = @ptrCast(kissfft.kiss_fftr_cfg, kiss_state_raw.ptr);
-
     // Allocate input and output buffers
-    const f_in = try allocator.alloc(f32, n_fft);
-    errdefer allocator.free(f_in);
+    const buf_real = try allocator.alloc(f32, n_fft);
+    errdefer allocator.free(buf_real);
 
-    const f_out = try allocator.alloc(kissfft.kiss_fft_cpx, n_fft);
-    errdefer allocator.free(f_out);
+    const buf_cpx = try allocator.alloc(kissfft.kiss_fft_cpx, n_fft);
+    errdefer allocator.free(buf_cpx);
 
-    var self = Self{
+    const kiss_cfg = kissfft.kiss_fftr_alloc(
+        @intCast(c_int, n_fft),
+        @boolToInt(mode_inverse),
+        null,
+        null,
+    );
+    if (kiss_cfg == null) {
+        return error.KissFFTAllocFailed;
+    }
+
+    var self = try allocator.create(Self);
+    errdefer allocator.destroy(self);
+
+    self.* = Self{
         .allocator = allocator,
         .n_fft = n_fft,
-        .kiss_state_raw = kiss_state_raw,
         .kiss_cfg = kiss_cfg,
-        .f_in = f_in,
-        .f_out = f_out,
+        .buf_real = buf_real,
+        .buf_cpx = buf_cpx,
         .sample_rate = sample_rate,
+        .mode_inverse = mode_inverse,
     };
-
-    self.resetKissFFT();
 
     return self;
 }
 
 pub fn deinit(self: *Self) void {
-    self.allocator.free(self.kiss_state_raw);
-    self.allocator.free(self.f_in);
-    self.allocator.free(self.f_out);
+    kissfft.kiss_fftr_free(self.kiss_cfg);
+    self.allocator.free(self.buf_real);
+    self.allocator.free(self.buf_cpx);
+    self.allocator.destroy(self);
 }
 
-pub fn fft(self: *Self, samples: SplitSlice(f32), window: []const f32, result: []f32) !void {
-    if (samples.len() != self.n_fft) {
+pub fn fft(
+    self: *Self,
+    samples: SplitSlice(f32),
+    window: []const f32,
+    bins: []Complex,
+) !void {
+    if (samples.first.len + samples.second.len != self.n_fft) {
         return error.InvalidSamplesLength;
     }
 
@@ -76,25 +96,41 @@ pub fn fft(self: *Self, samples: SplitSlice(f32), window: []const f32, result: [
         return error.InvalidWindowLength;
     }
 
-    if (result.len != self.binCount()) {
+    if (bins.len != self.binCount()) {
+        std.debug.print("bins.len: {} {}\n", .{bins.len, self.binCount()});
         return error.InvalidResultLength;
     }
 
-    // Reset internal state of KissFFT
-    self.resetKissFFT();
-
     // Applies the window function and loads the samples into the KissFFT input buffer
-    const in_samples = self.loadSamples(samples, window);
+    const in_samples = self.loadSamplesFwd(samples, window);
 
     // Run FFT
-    kissfft.kiss_fftr(self.kiss_cfg, in_samples.ptr, self.f_out.ptr);
+    kissfft.kiss_fftr(
+        self.kiss_cfg,
+        in_samples.ptr,
+        @ptrCast([*]kissfft.kiss_fft_cpx, bins.ptr),
+    );
+}
 
-    // Calculate the normalization factor for the window function
-    // so that we can normalize the output into [0, 1] range correctly
-    const window_norm = window_fn.windowNormFactor(window);
+pub fn invFft(
+    self: *Self,
+    bins: []const Complex,
+    result: []f32,
+) !void {
+    if (bins.len != self.binCount()) {
+        return error.InvalidBinsLength;
+    }
 
-    // Calculate normalized magnitude of each bin
-    self.binOutput(window_norm, result);
+    if (result.len != self.n_fft) {
+        return error.InvalidResultLength;
+    }
+
+    // Run FFT
+    kissfft.kiss_fftri(
+        self.kiss_cfg,
+        @ptrCast([*]const kissfft.kiss_fft_cpx, bins.ptr),
+        result.ptr,
+    );
 }
 
 /// Query the number of usable bins in the FFT output
@@ -143,66 +179,21 @@ pub fn binToFreq(self: Self, bin_index: usize) !f32 {
     return bin_f * bin_width;
 }
 
-/// Loads samples into the KissFFT input buffer
-fn loadSamples(self: *Self, samples: SplitSlice(f32), window: []const f32) []const f32 {
-    std.debug.assert(samples.len() == window.len);
+/// Loads samples into the KissFFT input buffer for forward FFT
+fn loadSamplesFwd(
+    self: *Self,
+    samples: SplitSlice(f32),
+    window: []const f32,
+) []const f32 {
+    std.debug.assert(samples.first.len + samples.second.len == window.len);
 
-    for (samples.first, 0..) |sample, idx| {
-        self.f_in[idx] = sample * window[idx];
+    for (samples.first, 0..) |sample, abs_idx| {
+        self.buf_real[abs_idx] = sample * window[abs_idx];
     }
 
-    for (samples.second, samples.first.len..) |sample, idx| {
-        self.f_in[idx] = sample * window[idx];
+    for (samples.second, samples.first.len..) |sample, abs_idx| {
+        self.buf_real[abs_idx] = sample * window[abs_idx];
     }
 
-    return self.f_in;
-}
-
-/// Calculates normalized magnitude of each bin
-fn binOutput(self: *Self, window_norm: f32, result: []f32) void {
-    const bin_count = self.binCount();
-
-    const norm_factor = window_norm / @intToFloat(f32, self.n_fft / 2);
-
-    for (0..bin_count) |idx| {
-        const r = self.f_out[idx].r;
-        const i = self.f_out[idx].i;
-
-        const _r2 = std.math.pow(f32, r, 2);
-        const _i2 = std.math.pow(f32, i, 2);
-
-        const magnitude = std.math.sqrt(_r2 + _i2);
-        result[idx] = magnitude * norm_factor;
-    }
-}
-
-fn resetKissFFT(self: *Self) void {
-    const c_nfft = @intCast(c_int, self.n_fft);
-    var lenmem: usize = self.kiss_state_raw.len;
-
-    const cfg = kissfft.kiss_fftr_alloc(c_nfft, 0, self.kiss_state_raw.ptr, &lenmem);
-
-    // cfg (==kiss_state_raw.ptr) should never be null as we've ensured
-    // that we're allocating enough memory using kissfftSizeNeeded
-    std.debug.assert(cfg != null);
-
-    // This shouldn't be required
-    // self.kiss_cfg = cfg;
-}
-
-fn kissfftSizeNeeded(n_fft: usize) usize {
-    const c_nfft = @intCast(c_int, n_fft);
-
-    var lenmem: usize = 1;
-
-    // This should fail and store the required buffer size in `lenmem`
-    const cfg = kissfft.kiss_fftr_alloc(c_nfft, 0, null, &lenmem);
-
-    if (cfg != null) {
-        // This should never succeed as we're passing lenmem that's too small
-        // https://github.com/mborgerding/kissfft/blob/8f47a67f595a6641c566087bf5277034be64f24d/kiss_fft.h#L112
-        unreachable;
-    }
-
-    return lenmem;
+    return self.buf_real;
 }

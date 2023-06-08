@@ -1,9 +1,9 @@
 [submodule "lib/kissfft"]
 	path = lib/kissfft
 	url = https://github.com/mborgerding/kissfft
-[submodule "lib/rnnoise"]
-	path = lib/rnnoise
-	url = https://github.com/xiph/rnnoise
 [submodule "lib/zig-clap"]
 	path = lib/zig-clap
 	url = https://github.com/Hejsil/zig-clap
+[submodule "lib/onnxruntime.zig"]
+	path = lib/onnxruntime.zig
+	url = https://github.com/recursiveGecko/onnxruntime.zig

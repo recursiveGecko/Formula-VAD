@@ -5,7 +5,6 @@ const Allocator = std.mem.Allocator;
 const BufferedFFT = @import("./BufferedFFT.zig");
 const window_fn = @import("../audio_utils/window_fn.zig");
 const AudioPipeline = @import("../AudioPipeline.zig");
-const Denoiser = @import("../Denoiser.zig");
 const SplitSlice = @import("../structures/SplitSlice.zig").SplitSlice;
 const Segment = @import("./Segment.zig");
 const SegmentWriter = @import("./SegmentWriter.zig");
@@ -89,7 +88,7 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     var buffered_volume_analyzer = try BufferedVolumeAnalyzer.init(allocator);
     errdefer buffered_volume_analyzer.deinit();
 
-    var buffered_denoiser = try BufferedDenoiser.init(allocator, n_channels);
+    var buffered_denoiser = try BufferedDenoiser.init(allocator, n_channels, sample_rate);
     errdefer buffered_denoiser.deinit();
 
     var buffered_fft = try BufferedFFT.init(allocator, .{
@@ -149,16 +148,8 @@ pub fn run(self: *Self) !void {
     try self.collectInputStep();
 }
 
-fn pipelineReadSize(config: Config) usize {
-    if (config.use_denoiser) {
-        return Denoiser.getFrameSize();
-    } else {
-        return config.fft_size;
-    }
-}
-
 fn collectInputStep(self: *Self) !void {
-    const frame_size = pipelineReadSize(self.config);
+    const frame_size = self.buffered_denoiser.getChunkSize();
     const p = self.pipeline;
     const p_total_write_count = p.totalWriteCount();
 

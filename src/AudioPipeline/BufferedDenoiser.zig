@@ -5,7 +5,7 @@ const Segment = @import("./Segment.zig");
 const SegmentWriter = @import("./SegmentWriter.zig");
 const VADMetadata = @import("./VADMetadata.zig");
 const BufferedStep = @import("./BufferedStep.zig");
-const Denoiser = @import("../Denoiser.zig");
+const NSNet2 = @import("../NSNet2.zig");
 
 const Self = @This();
 pub const Result = struct {
@@ -17,33 +17,39 @@ pub const Result = struct {
 
 allocator: Allocator,
 n_channels: usize,
-denoisers: []Denoiser,
+sample_rate: usize,
+denoisers: []NSNet2,
 buffer: SegmentWriter,
 vad_metadata: VADMetadata = .{},
 temp_result_segment: Segment,
 
-pub fn init(allocator: Allocator, n_channels: usize) !Self {
+pub fn init(
+    allocator: Allocator,
+    n_channels: usize,
+    sample_rate: usize,
+) !Self {
     const temp_result_segment = try Segment.initWithCapacity(
         allocator,
         n_channels,
-        Denoiser.getFrameSize(),
+        getChunkSizeForSR(sample_rate),
     );
 
-    var denoisers = try allocator.alloc(Denoiser, n_channels);
+    var denoisers = try allocator.alloc(NSNet2, n_channels);
     for (0..n_channels) |i| {
-        denoisers[i] = try Denoiser.init(allocator);
+        denoisers[i] = try NSNet2.init(allocator, sample_rate);
     }
     errdefer {
         for (0..n_channels) |i| denoisers[i].deinit();
         allocator.free(denoisers);
     }
 
-    var buffer = try SegmentWriter.init(allocator, n_channels, Denoiser.getFrameSize());
+    var buffer = try SegmentWriter.init(allocator, n_channels, getChunkSizeForSR(sample_rate));
     errdefer buffer.deinit();
 
     return Self{
         .allocator = allocator,
         .n_channels = n_channels,
+        .sample_rate = sample_rate,
         .denoisers = denoisers,
         .temp_result_segment = temp_result_segment,
         .buffer = buffer,
@@ -55,6 +61,14 @@ pub fn deinit(self: *Self) void {
     self.allocator.free(self.denoisers);
     self.temp_result_segment.deinit();
     self.buffer.deinit();
+}
+
+pub fn getChunkSize(self: *Self) usize {
+    return getChunkSizeForSR(self.sample_rate);
+}
+
+pub fn getChunkSizeForSR(sample_rate: usize) usize {
+    return NSNet2.getChunkSize(sample_rate);
 }
 
 pub fn write(
@@ -87,19 +101,16 @@ pub fn write(
     var result_segment: *Segment = &self.temp_result_segment;
     result_segment.index = self.buffer.segment.index;
 
-    var vad_min: f32 = 100;
     for (0..self.n_channels) |i| {
         // FIXME: Each channel should use its own denoiser.
-        var vad = try self.denoisers[0].denoise(
+        try self.denoisers[0].denoise(
             input.segment.channel_pcm_buf[i],
             result_segment.channel_pcm_buf[i].first,
         );
-
-        if (vad < vad_min) vad_min = vad;
     }
 
     self.vad_metadata.push(
-        .{ .rnn_vad = vad_min },
+        .{ .rnn_vad = 0 },
         result_segment.length,
     );
 
