@@ -220,6 +220,7 @@ pub fn denoise(self: *Self, samples: SplitSlice(f32), denoised_result: []f32) !v
 }
 
 fn calcDownsampleRate(in_sample_rate: usize) usize {
+    if (in_sample_rate % 16000 != 0) @panic("Invalid sample rate - must be divisible by 16000");
     return in_sample_rate / 16000;
 }
 
@@ -229,8 +230,6 @@ fn downsampleAudio(
     downsample_rate: usize,
 ) void {
     if (input_samples.len() != output_samples.len * downsample_rate) {
-        std.debug.print("Invalid downsampling length: {} {}\n", .{input_samples.len(), output_samples.len * downsample_rate});
-
         @panic("Invalid downsampling inputs");
     }
 
