@@ -6,6 +6,7 @@ const Allocator = std.mem.Allocator;
 const SplitSlice = @import("./structures/SplitSlice.zig").SplitSlice;
 const FFT = @import("./FFT.zig");
 const window_fn = @import("audio_utils/window_fn.zig");
+const resample = @import("audio_utils/resample.zig");
 const onnx = @import("onnxruntime");
 
 const n_fft = 320;
@@ -149,11 +150,11 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn getChunkSize(in_sample_rate: usize) usize {
-    return chunk_size * calcDownsampleRate(in_sample_rate);
+    return chunk_size * resample.calcDownsampleRate(in_sample_rate, 16000);
 }
 
 pub fn denoise(self: *Self, samples: SplitSlice(f32), denoised_result: []f32) !void {
-    const downsample_rate = calcDownsampleRate(self.in_sample_rate);
+    const downsample_rate = resample.calcDownsampleRate(self.in_sample_rate, 16000);
     const n_frames = calcNFrames(chunk_size);
 
     const in_len = samples.first.len + samples.second.len;
@@ -185,7 +186,7 @@ pub fn denoise(self: *Self, samples: SplitSlice(f32), denoised_result: []f32) !v
     // We do need to zero out the OUTput buffer, its values are additive in the final overlap-add step (reconstructAudio fn)
     @memset(out_after_first_hop, 0);
 
-    downsampleAudio(
+    resample.downsampleAudio(
         samples,
         in_read_slice,
         downsample_rate,
@@ -211,64 +212,11 @@ pub fn denoise(self: *Self, samples: SplitSlice(f32), denoised_result: []f32) !v
         self.audio_output,
     );
 
-    // FIXME: upsampling could use a better algorithm
-    upsampleAudio(
+    resample.upsampleAudio(
         out_completed_slice,
         denoised_result,
         downsample_rate,
     );
-}
-
-fn calcDownsampleRate(in_sample_rate: usize) usize {
-    if (in_sample_rate % 16000 != 0) @panic("Invalid sample rate - must be divisible by 16000");
-    return in_sample_rate / 16000;
-}
-
-fn downsampleAudio(
-    input_samples: SplitSlice(f32),
-    output_samples: []f32,
-    downsample_rate: usize,
-) void {
-    if (input_samples.len() != output_samples.len * downsample_rate) {
-        @panic("Invalid downsampling inputs");
-    }
-
-    const n_steps = input_samples.len() / downsample_rate;
-
-    for (0..n_steps) |i| {
-        const src_idx = i * downsample_rate;
-
-        if (src_idx < input_samples.first.len) {
-            output_samples[i] = input_samples.first[src_idx];
-        } else if (src_idx >= input_samples.first.len) {
-            output_samples[i] = input_samples.second[src_idx - input_samples.first.len];
-        }
-    }
-}
-
-fn upsampleAudio(
-    input_samples: []f32,
-    output_samples: []f32,
-    upsample_rate: usize,
-) void {
-    if (input_samples.len * upsample_rate != output_samples.len) {
-        @panic("Invalid upsampling inputs");
-    }
-
-    const n_steps = input_samples.len;
-
-    for (0..n_steps) |i| {
-        const dst_idx = i * upsample_rate;
-
-        output_samples[dst_idx] = input_samples[i];
-        if (i + 1 == n_steps) return;
-
-        const curr = input_samples[i];
-        const next = input_samples[i + 1];
-
-        output_samples[dst_idx + 1] = std.math.lerp(curr, next, 1.0 / 3.0);
-        output_samples[dst_idx + 2] = std.math.lerp(curr, next, 2.0 / 3.0);
-    }
 }
 
 pub fn calcSpectrogram(
