@@ -199,7 +199,7 @@ pub fn calcFalsePositiveSec(
     defer alloc.free(extruded_ref_matches);
 
     const extruded_overlap = calcOverlapMany(vad_segment, extruded_ref_matches);
-    return vad_segment.duration() - extruded_overlap;
+    return @max(0.0, vad_segment.duration() - extruded_overlap);
 }
 
 pub fn calcTruePositiveSec(
@@ -210,7 +210,7 @@ pub fn calcTruePositiveSec(
     if (vad_segment.side != .vad) return error.InvalidSegmentSide;
 
     const fp = try calcFalsePositiveSec(alloc, vad_segment, config);
-    return vad_segment.duration() - fp;
+    return @max(0.0, vad_segment.duration() - fp);
 }
 
 pub fn calcFalseNegativeSec(
@@ -223,7 +223,7 @@ pub fn calcFalseNegativeSec(
     _ = config;
     _ = alloc;
     const overlap = calcOverlapWithMatches(ref_segment);
-    return ref_segment.duration() - overlap;
+    return @max(0.0, ref_segment.duration() - overlap);
 }
 
 pub fn extrudeSegments(
