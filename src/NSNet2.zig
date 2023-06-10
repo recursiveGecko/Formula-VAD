@@ -13,6 +13,8 @@ const n_fft = 320;
 const n_hop = 160;
 const chunk_size = 50 * n_hop;
 
+const artifact_mitigation_window = 1;
+
 const Self = @This();
 
 allocator: std.mem.Allocator,
@@ -62,14 +64,15 @@ pub fn init(
     const n_bins = calcNBins();
 
     //
-    // Spectrogram input
+    // Features input
     //
+    const adjusted_n_frames = n_frames + artifact_mitigation_window;
     var features_node_dimms: []const i64 = &.{
         1,
-        @intCast(i64, n_frames),
+        @intCast(i64, adjusted_n_frames),
         @intCast(i64, n_bins),
     };
-    var features = try allocator.alloc(f32, n_frames * n_bins);
+    var features = try allocator.alloc(f32, adjusted_n_frames * n_bins);
     errdefer allocator.free(features);
     @memset(features, 0);
     var features_ort_input = try onnx_instance.createTensorWithDataAsOrtValue(
@@ -88,10 +91,10 @@ pub fn init(
     //
     var gain_node_dimms: []const i64 = &.{
         1,
-        @intCast(i64, n_frames),
+        @intCast(i64, adjusted_n_frames),
         @intCast(i64, n_bins),
     };
-    var gains = try allocator.alloc(f32, n_frames * n_bins);
+    var gains = try allocator.alloc(f32, adjusted_n_frames * n_bins);
     errdefer allocator.free(gains);
     var gains_ort_output = try onnx_instance.createTensorWithDataAsOrtValue(
         f32,
@@ -156,6 +159,7 @@ pub fn getChunkSize(in_sample_rate: usize) usize {
 pub fn denoise(self: *Self, samples: SplitSlice(f32), denoised_result: []f32) !void {
     const downsample_rate = resample.calcDownsampleRate(self.in_sample_rate, 16000);
     const n_frames = calcNFrames(chunk_size);
+    const n_bins = calcNBins();
 
     const in_len = samples.first.len + samples.second.len;
     if (in_len != chunk_size * downsample_rate) {
@@ -177,6 +181,14 @@ pub fn denoise(self: *Self, samples: SplitSlice(f32), denoised_result: []f32) !v
     var out_completed_slice: []f32 = self.audio_output[0..chunk_size];
     var out_after_first_hop: []f32 = self.audio_output[n_hop..];
 
+    // Part of the audible artifact mitigation strategy
+    // Offset into the features and gains array where the current chunk's data will be stored
+    const features_gains_curr_idx = self.features.len - n_frames * n_bins;
+    var gains_curr_slice = self.gains[features_gains_curr_idx..];
+    var features_curr_slice = self.features[features_gains_curr_idx..];
+    var features_copy_src = self.features[n_frames * n_bins ..];
+    var features_copy_dst = self.features[0..features_gains_curr_idx];
+
     // Copy the last n_hop samples from the previous chunk to the beginning
     // of the next chunk for overlap
     @memcpy(in_first_hop, in_last_hop);
@@ -185,6 +197,8 @@ pub fn denoise(self: *Self, samples: SplitSlice(f32), denoised_result: []f32) !v
     // We don't need to zero the INput buffer because it's overwritten during downsampling
     // We do need to zero out the OUTput buffer, its values are additive in the final overlap-add step (reconstructAudio fn)
     @memset(out_after_first_hop, 0);
+
+    std.mem.copyBackwards(f32, features_copy_dst, features_copy_src);
 
     resample.downsampleAudio(
         samples,
@@ -200,9 +214,9 @@ pub fn denoise(self: *Self, samples: SplitSlice(f32), denoised_result: []f32) !v
         self.specgram,
     );
 
-    calcFeatures(self.specgram, self.features);
+    calcFeatures(self.specgram, features_curr_slice);
     try self.onnx_instance.run();
-    applySpecgramGain(self.specgram, self.gains);
+    applySpecgramGain(self.specgram, gains_curr_slice);
 
     try reconstructAudio(
         self.inv_fft,
