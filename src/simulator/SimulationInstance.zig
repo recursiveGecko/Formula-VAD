@@ -6,7 +6,7 @@ const AudioPipeline = @import("../AudioPipeline.zig");
 const AudioFileStream = @import("../audio_utils/AudioFileStream.zig");
 const AudioBuffer = @import("../audio_utils/AudioBuffer.zig");
 const AudioSource = @import("../audio_utils/AudioSource.zig").AudioSource;
-const VAD = @import("../AudioPipeline/VAD.zig");
+const VADPipeline = @import("../AudioPipeline/VADPipeline.zig");
 const simulator = @import("../simulator.zig");
 const Evaluator = @import("../Evaluator.zig");
 const static_sim_config = simulator.static_sim_config;
@@ -165,7 +165,7 @@ pub fn run(self: *Self) !void {
     try self.storeResult(vad_segments);
 }
 
-fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VAD.VADSpeechSegment {
+fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VADPipeline.SpeechSegment {
     var pipeline_ctx = PipelineContext{
         .sim_instance = self,
     };
@@ -230,7 +230,7 @@ fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VAD.VA
 
 pub fn storeResult(
     self: *Self,
-    vad_segments: []VAD.VADSpeechSegment,
+    vad_segments: []VADPipeline.SpeechSegment,
 ) !void {
     var speech_segments = try self.main_thread_allocator.alloc(Evaluator.SpeechSegment, vad_segments.len);
     errdefer self.main_thread_allocator.free(speech_segments);
@@ -243,8 +243,8 @@ pub fn storeResult(
 
         const debug_info = try std.fmt.allocPrint(
             self.main_thread_allocator,
-            "rnn:{d:.2}% vr:{d:.2}",
-            .{ vad_segment.debug_rnn_vad * 100, vad_segment.debug_avg_speech_vol_ratio },
+            "vad:{d:.2}% vr:{d:.2} vad:{d:.1}s",
+            .{ vad_segment.avg_vad * 100, vad_segment.avg_channel_vol_ratio, vad_segment.vad_met_sec },
         );
 
         speech_segments[i] = .{

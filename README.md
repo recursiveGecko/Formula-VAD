@@ -7,7 +7,7 @@ Project dedicated to audio analysis of F1 onboard streams for the purposes of ra
 
 # Current VAD results
 
-As of `2023-06-08`.
+As of `2023-06-10` with experimental Silero VAD.
 
 ```
 => Definitions
@@ -25,45 +25,40 @@ FDR (False discovery rate):                 Probability that detected speech seg
 
 |                           Name |    P |   TP |   FP |   FN |    TPR |    PPV |  FNR (!) |  FDR (!) |
 | ------------------------------ | ---- | ---- | ---- | ---- | ------ | ------ | -------- | -------- |
-|        2023 Monaco FP1 - Perez | 1036 | 1017 |   29 |   20 |  98.1% |  97.2% |     1.9% |     2.8% |
-|     2023 Miami Race - Sargeant | 1108 | 1095 |   11 |   13 |  98.8% |  99.1% |     1.2% |     0.9% |
-|        2023 Miami Race - Gasly | 1493 | 1463 |   73 |   30 |  98.0% |  95.2% |     2.0% |     4.8% |
-|        2023 Miami Race - Perez |  971 |  931 |   11 |   40 |  95.9% |  98.9% |     4.1% |     1.1% |
-|      2023 Miami Race - Leclerc | 1213 | 1213 |    0 |    1 |  99.9% | 100.0% |     0.1% |     0.0% |
-|     2023 Miami Race - De Vries |  964 |  959 |    0 |    5 |  99.5% | 100.0% |     0.5% |     0.0% |
-|         2023 Miami Race - Zhou | 1078 | 1063 |    6 |   15 |  98.6% |  99.5% |     1.4% |     0.5% |
-|    2023 Miami Race - Magnussen |  986 |  964 |    7 |   22 |  97.8% |  99.3% |     2.2% |     0.7% |
-|      2023 Miami Race - Russell | 1444 | 1415 |   11 |   30 |  97.9% |  99.2% |     2.1% |     0.8% |
-|       2023 Miami Race - Norris |  503 |  501 |    0 |    2 |  99.6% | 100.0% |     0.4% |     0.0% |
-|       2023 Miami Race - Stroll | 1091 | 1083 |   21 |    8 |  99.3% |  98.1% |     0.7% |     1.9% |
-|      2023 Miami Race - Tsunoda |  655 |  649 |    0 |    5 |  99.2% | 100.0% |     0.8% |     0.0% |
-|   2023 Miami Race - Verstappen | 1027 | 1012 |    0 |   15 |  98.6% | 100.0% |     1.4% |     0.0% |
-|        2023 Miami Race - Sainz | 1443 | 1440 |   13 |    3 |  99.8% |  99.1% |     0.2% |     0.9% |
-|        2023 Miami Race - Albon |  545 |  521 |   15 |   24 |  95.7% |  97.3% |     4.3% |     2.7% |
-|   2023 Miami Race - Hulkenberg |  619 |  619 |   17 |    0 | 100.0% |  97.3% |     0.0% |     2.7% |
-|         2023 Miami Race - Ocon |  605 |  600 |   78 |    5 |  99.2% |  88.5% |     0.8% |    11.5% |
-|     2023 Miami Race - Hamilton | 1261 | 1240 |   10 |   21 |  98.3% |  99.2% |     1.7% |     0.8% |
-|       2023 Miami Race - Alonso | 1162 | 1137 |    0 |   25 |  97.9% | 100.0% |     2.1% |     0.0% |
-|       2023 Miami Race - Bottas |  579 |  578 |    0 |    1 |  99.9% | 100.0% |     0.1% |     0.0% |
-|      2023 Miami Race - Piastri |  870 |  854 |    0 |   16 |  98.2% | 100.0% |     1.8% |     0.0% |
+|        2023 Monaco FP1 - Perez | 1158 | 1125 | 1164 |   33 |  97.1% |  49.1% |     2.9% |    50.9% |
+|     2023 Miami Race - Sargeant | 1091 | 1016 |  666 |   75 |  93.2% |  60.4% |     6.8% |    39.6% |
+|        2023 Miami Race - Gasly | 1935 | 1889 | 3110 |   46 |  97.6% |  37.8% |     2.4% |    62.2% |
+|        2023 Miami Race - Perez | 1378 | 1338 | 3485 |   40 |  97.1% |  27.7% |     2.9% |    72.3% |
+|      2023 Miami Race - Leclerc |  917 |  778 |    0 |  140 |  84.8% | 100.0% |    15.2% |     0.0% |
+|     2023 Miami Race - De Vries |  996 |  964 | 2377 |   32 |  96.8% |  28.8% |     3.2% |    71.2% |
+|         2023 Miami Race - Zhou |  768 |  610 |  227 |  158 |  79.4% |  72.9% |    20.6% |    27.1% |
+|    2023 Miami Race - Magnussen |  984 |  941 |   24 |   43 |  95.6% |  97.5% |     4.4% |     2.5% |
+|      2023 Miami Race - Russell | 1767 | 1643 | 2925 |  124 |  93.0% |  36.0% |     7.0% |    64.0% |
+|       2023 Miami Race - Norris |  461 |  422 | 1404 |   39 |  91.6% |  23.1% |     8.4% |    76.9% |
+|       2023 Miami Race - Stroll | 1038 |  993 |    0 |   45 |  95.6% | 100.0% |     4.4% |     0.0% |
+|      2023 Miami Race - Tsunoda |  852 |  839 | 3895 |   14 |  98.4% |  17.7% |     1.6% |    82.3% |
+|   2023 Miami Race - Verstappen | 1287 | 1270 | 2737 |   18 |  98.6% |  31.7% |     1.4% |    68.3% |
+|        2023 Miami Race - Sainz | 1092 |  901 |    0 |  191 |  82.5% | 100.0% |    17.5% |     0.0% |
+|        2023 Miami Race - Albon |  566 |  506 | 1826 |   61 |  89.3% |  21.7% |    10.7% |    78.3% |
+|   2023 Miami Race - Hulkenberg |  525 |  503 |   35 |   22 |  95.8% |  93.6% |     4.2% |     6.4% |
+|         2023 Miami Race - Ocon |  460 |  378 |  245 |   82 |  82.1% |  60.6% |    17.9% |    39.4% |
+|     2023 Miami Race - Hamilton | 1538 | 1457 | 3620 |   81 |  94.7% |  28.7% |     5.3% |    71.3% |
+|       2023 Miami Race - Alonso | 1170 | 1128 |  149 |   42 |  96.5% |  88.3% |     3.5% |    11.7% |
+|       2023 Miami Race - Bottas |  421 |  381 |  101 |   39 |  90.7% |  79.1% |     9.3% |    20.9% |
+|      2023 Miami Race - Piastri |  867 |  808 | 1293 |   59 |  93.2% |  38.5% |     6.8% |    61.5% |
 
 => Aggregate stats 
 
-Total speech duration  (P): 20652.7 sec
-True positives        (TP): 20354.3 sec
-False positives       (FP):   300.9 sec
-False negatives       (FN):   298.5 sec    Min.    Avg.    Max. 
-True positive rate   (TPR):    98.6%  |   95.7% / 98.6% /100.0% 
-Precision            (PPV):    98.5%  |   88.5% / 98.5% /100.0% 
-False negative rate  (FNR):     1.4%  |    0.0% /  1.4% /  4.3% 
-False discovery rate (FDR):     1.5%  |    0.0% /  1.5% / 11.5% 
-F-Score (β =  0.70)       :    98.5% 
-Fowlkes-Mallows index     :    98.5% 
-
-________________________________________________________
-Executed in  387.73 secs    fish           external
-   usr time  130.29 mins    0.00 micros  130.29 mins
-   sys time    0.68 mins  336.00 micros    0.68 mins
+Total speech duration  (P): 21271.0 sec
+True positives        (TP): 19888.2 sec
+False positives       (FP): 29282.6 sec
+False negatives       (FN):  1382.8 sec    Min.    Avg.    Max. 
+True positive rate   (TPR):    93.5%  |   79.4% / 92.6% / 98.6% 
+Precision            (PPV):    40.4%  |   17.7% / 56.8% /100.0% 
+False negative rate  (FNR):     6.5%  |    1.4% /  7.4% / 20.6% 
+False discovery rate (FDR):    59.6%  |    0.0% / 43.2% / 82.3% 
+F-Score (β =  0.70)       :    49.7% 
+Fowlkes-Mallows index     :    61.5% 
 ```
 
 # Cloning

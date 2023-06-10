@@ -12,36 +12,26 @@ const VADMachine = @import("./VADMachine.zig");
 const VADMetadata = @import("./VADMetadata.zig");
 const BufferedVolumeAnalyzer = @import("./BufferedVolumeAnalyzer.zig");
 const BufferedDenoiser = @import("./BufferedDenoiser.zig");
+const BufferedSileroVAD = @import("./BufferedSileroVAD.zig");
 const BufferedStep = @import("./BufferedStep.zig");
 const audio_utils = @import("../audio_utils.zig");
 
 const Self = @This();
 
 pub const Config = struct {
-    fft_size: usize = 2048,
+    fft_size: usize = 1024,
     use_denoiser: bool = true,
     vad_machine_config: VADMachine.Config = .{},
     // Alternative state machine configs for training
     alt_vad_machine_configs: ?[]const VADMachine.Config = null,
 };
 
-pub const VADSpeechSegment = struct {
+pub const SpeechSegment = struct {
     sample_from: usize,
     sample_to: usize,
-    debug_rnn_vad: f32,
-    debug_avg_speech_vol_ratio: f32,
-};
-
-pub const VADMachineResult = struct {
-    pub const RecordingState = enum {
-        none,
-        started,
-        completed,
-        aborted,
-    };
-
-    recording_state: RecordingState,
-    sample_number: u64,
+    avg_vad: f32,
+    avg_channel_vol_ratio: f32,
+    vad_met_sec: f32,
 };
 
 allocator: Allocator,
@@ -55,7 +45,8 @@ pipeline_read_count: u64 = 0,
 temp_input_segment: Segment,
 buffered_volume_analyzer: BufferedVolumeAnalyzer,
 buffered_denoiser: BufferedDenoiser,
-buffered_fft: BufferedFFT,
+// buffered_fft: BufferedFFT,
+buffered_silero_vad: BufferedSileroVAD,
 // Speech state machine
 vad_machine: VADMachine,
 alt_vad_machines: ?[]VADMachine,
@@ -91,13 +82,19 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     var buffered_denoiser = try BufferedDenoiser.init(allocator, n_channels, sample_rate);
     errdefer buffered_denoiser.deinit();
 
-    var buffered_fft = try BufferedFFT.init(allocator, .{
-        .n_channels = n_channels,
-        .fft_size = config.fft_size,
-        .hop_size = config.fft_size,
-        .sample_rate = sample_rate,
-    });
-    errdefer buffered_fft.deinit();
+    // var buffered_fft = try BufferedFFT.init(allocator, .{
+    //     .n_channels = n_channels,
+    //     .fft_size = config.fft_size,
+    //     .hop_size = config.fft_size,
+    //     .sample_rate = sample_rate,
+    // });
+    // errdefer buffered_fft.deinit();
+
+    var buffered_silero_vad = try BufferedSileroVAD.init(
+        allocator,
+        n_channels,
+        sample_rate,
+    );
 
     var self = Self{
         .allocator = allocator,
@@ -108,7 +105,8 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
         .temp_input_segment = temp_input_segment,
         .buffered_volume_analyzer = buffered_volume_analyzer,
         .buffered_denoiser = buffered_denoiser,
-        .buffered_fft = buffered_fft,
+        // .buffered_fft = buffered_fft,
+        .buffered_silero_vad = buffered_silero_vad,
         .vad_machine = undefined,
         .alt_vad_machines = null,
     };
@@ -141,7 +139,8 @@ pub fn deinit(self: *Self) void {
     self.temp_input_segment.deinit();
     self.buffered_volume_analyzer.deinit();
     self.buffered_denoiser.deinit();
-    self.buffered_fft.deinit();
+    // self.buffered_fft.deinit();
+    self.buffered_silero_vad.deinit();
 }
 
 pub fn run(self: *Self) !void {
@@ -171,7 +170,7 @@ fn collectInputStep(self: *Self) !void {
         if (self.config.use_denoiser) {
             try self.denoiserStep(&analyzed_step_result);
         } else {
-            try self.fftStep(&analyzed_step_result);
+            try self.sileroVADStep(&analyzed_step_result);
         }
     }
 }
@@ -186,20 +185,20 @@ fn denoiserStep(
 
         if (denoised_result.denoised_segment == null) return;
 
-        var fft_input = BufferedStep.Result{
+        var vad_input = BufferedStep.Result{
             .segment = denoised_result.denoised_segment.?,
             .metadata = denoised_result.metadata.?,
         };
-        
+
         try self.pipeline.pushDenoisedSamples(denoised_result.denoised_segment.?);
-        try self.fftStep(&fft_input);
+        try self.sileroVADStep(&vad_input);
 
         if (denoised_result.n_remaining_input == 0) return;
         input_offset = input.segment.length - denoised_result.n_remaining_input;
     }
 }
 
-fn fftStep(
+fn sileroVADStep(
     self: *Self,
     input: *const BufferedStep.Result,
 ) !void {
@@ -207,10 +206,10 @@ fn fftStep(
     // So we might have to split it into multiple FFT buffer writes
     var input_offset: usize = 0;
     while (true) {
-        const result = try self.buffered_fft.write(input, input_offset);
-        if (result.fft_result == null) return;
+        const result = try self.buffered_silero_vad.write(input, input_offset);
+        if (result.vad == null) return;
 
-        try self.stateMachineStep(&result.fft_result.?);
+        try self.stateMachineStep(&result);
 
         if (result.n_remaining_input == 0) return;
         input_offset = input.segment.length - result.n_remaining_input;
@@ -219,18 +218,21 @@ fn fftStep(
 
 fn stateMachineStep(
     self: *Self,
-    fft_step_result: *const BufferedFFT.Result,
+    silero_vad_result: *const BufferedSileroVAD.Result,
 ) !void {
-    const vad_result = try self.vad_machine.run(fft_step_result);
+    const vad_result = try self.vad_machine.run(silero_vad_result);
 
     switch (vad_result.recording_state) {
         .started => {
+            log.info("Starting recording at: {d}", .{vad_result.sample_number});
             try self.pipeline.startRecording(vad_result.sample_number);
         },
         .completed => {
+            log.info("Completing recording at: {d}", .{vad_result.sample_number});
             try self.pipeline.endRecording(vad_result.sample_number, true);
         },
         .aborted => {
+            log.info("Aborting recording at: {d}", .{vad_result.sample_number});
             try self.pipeline.endRecording(vad_result.sample_number, false);
         },
         .none => {},
@@ -239,7 +241,7 @@ fn stateMachineStep(
     // Run the VAD machines for the alternative VADs (training)
     if (self.alt_vad_machines) |alt_vads| {
         for (alt_vads) |*alt_vad| {
-            _ = try alt_vad.run(fft_step_result);
+            _ = try alt_vad.run(silero_vad_result);
         }
     }
 }
