@@ -10,6 +10,14 @@
       "options": {
         "cwd": "${workspaceFolder}"
       }
+    },
+    {
+      "label": "Build formula-vad.zig (ReleaseSafe)",
+      "type": "shell",
+      "command": "zig build -Doptimize=ReleaseSafe",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
     }
   ]
 }
