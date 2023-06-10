@@ -179,11 +179,13 @@ pub fn sliceSegment(self: Self, result_segment: *Segment, abs_from: u64, abs_to:
 }
 
 pub fn startRecording(self: *Self, from_sample: usize) !void {
+    log.info("Starting original & denoised recording from sample {d}", .{from_sample});
     try self.original_audio_recorder.startRecording(from_sample);
     try self.denoised_audio_recorder.startRecording(from_sample);
 }
 
 pub fn endRecording(self: *Self, to_sample: usize, keep: bool) !void {
+    log.info("Ending recording at sample {d}, keep: {}", .{to_sample, keep});
     try self.original_audio_recorder.stopRecording(to_sample, keep);
     try self.denoised_audio_recorder.stopRecording(to_sample, keep);
 }
