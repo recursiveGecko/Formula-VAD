@@ -102,17 +102,11 @@ pub fn write(
     result_segment.index = self.buffer.segment.index;
 
     for (0..self.n_channels) |i| {
-        // FIXME: Each channel should use its own denoiser.
-        try self.denoisers[0].denoise(
-            input.segment.channel_pcm_buf[i],
+        try self.denoisers[i].denoise(
+            self.buffer.segment.channel_pcm_buf[i],
             result_segment.channel_pcm_buf[i].first,
         );
     }
-
-    self.vad_metadata.push(
-        .{ .rnn_vad = 0 },
-        result_segment.length,
-    );
 
     const result = Result{
         .input_segment = input.segment,
