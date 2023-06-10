@@ -24,7 +24,7 @@ pub const std_options = struct {
     pub const log_scope_levels = &.{
         .{
             .scope = .vad_sm,
-            .level = .info,
+            .level = .warn,
         },
     };
 };

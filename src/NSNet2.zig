@@ -13,7 +13,7 @@ const n_fft = 320;
 const n_hop = 160;
 const chunk_size = 50 * n_hop;
 
-const artifact_mitigation_window = 1;
+const artifact_mitigation_window = 4;
 
 const Self = @This();
 
@@ -30,6 +30,7 @@ specgram: []FFT.Complex,
 inv_fft_buffer: []f32,
 features: []f32,
 gains: []f32,
+last_sample: f32 = 0,
 
 pub fn init(
     allocator: std.mem.Allocator,
@@ -226,9 +227,10 @@ pub fn denoise(self: *Self, samples: SplitSlice(f32), denoised_result: []f32) !v
         self.audio_output,
     );
 
-    resample.upsampleAudio(
+    self.last_sample = resample.upsampleAudio(
         out_completed_slice,
         denoised_result,
+        self.last_sample,
         downsample_rate,
     );
 }
