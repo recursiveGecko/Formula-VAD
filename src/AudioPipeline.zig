@@ -6,7 +6,7 @@ const Segment = @import("./AudioPipeline/Segment.zig");
 const MRBRecorder = @import("./AudioPipeline/MRBRecorder.zig");
 const SplitSlice = @import("./structures/SplitSlice.zig").SplitSlice;
 const MultiRingBuffer = @import("./structures/MultiRingBuffer.zig").MultiRingBuffer;
-pub const VAD = @import("./AudioPipeline/VAD.zig");
+pub const VADPipeline = @import("./AudioPipeline/VADPipeline.zig");
 pub const AudioBuffer = @import("./audio_utils/AudioBuffer.zig");
 
 const Self = @This();
@@ -21,7 +21,7 @@ pub const Config = struct {
     sample_rate: usize,
     n_channels: usize,
     buffer_length: ?usize = null,
-    vad_config: VAD.Config = .{},
+    vad_config: VADPipeline.Config = .{},
     skip_processing: bool = false,
 };
 
@@ -31,7 +31,7 @@ original_audio_buffer: MultiRingBuffer(f32, u64),
 denoised_audio_buffer: MultiRingBuffer(f32, u64),
 original_audio_recorder: MRBRecorder,
 denoised_audio_recorder: MRBRecorder,
-vad: VAD,
+vad: VADPipeline,
 callbacks: ?Callbacks = null,
 // Temporarily holds a slice of channel data, e.g. when writing
 // denoised Segments to the denoised_audio_buffer
@@ -77,7 +77,7 @@ pub fn init(
         .temp_channel_slice = temp_channel_slice,
     };
 
-    self.vad = try VAD.init(self, config.vad_config);
+    self.vad = try VADPipeline.init(self, config.vad_config);
     errdefer self.vad.deinit();
 
     self.original_audio_recorder = try MRBRecorder.init(

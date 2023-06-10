@@ -7,7 +7,7 @@ Project dedicated to audio analysis of F1 onboard streams for the purposes of ra
 
 # Current VAD results
 
-As of `2023-06-08`.
+As of `2023-06-10`.
 
 ```
 => Definitions
@@ -25,45 +25,45 @@ FDR (False discovery rate):                 Probability that detected speech seg
 
 |                           Name |    P |   TP |   FP |   FN |    TPR |    PPV |  FNR (!) |  FDR (!) |
 | ------------------------------ | ---- | ---- | ---- | ---- | ------ | ------ | -------- | -------- |
-|        2023 Monaco FP1 - Perez | 1036 | 1017 |   29 |   20 |  98.1% |  97.2% |     1.9% |     2.8% |
-|     2023 Miami Race - Sargeant | 1108 | 1095 |   11 |   13 |  98.8% |  99.1% |     1.2% |     0.9% |
-|        2023 Miami Race - Gasly | 1493 | 1463 |   73 |   30 |  98.0% |  95.2% |     2.0% |     4.8% |
-|        2023 Miami Race - Perez |  971 |  931 |   11 |   40 |  95.9% |  98.9% |     4.1% |     1.1% |
-|      2023 Miami Race - Leclerc | 1213 | 1213 |    0 |    1 |  99.9% | 100.0% |     0.1% |     0.0% |
-|     2023 Miami Race - De Vries |  964 |  959 |    0 |    5 |  99.5% | 100.0% |     0.5% |     0.0% |
-|         2023 Miami Race - Zhou | 1078 | 1063 |    6 |   15 |  98.6% |  99.5% |     1.4% |     0.5% |
-|    2023 Miami Race - Magnussen |  986 |  964 |    7 |   22 |  97.8% |  99.3% |     2.2% |     0.7% |
-|      2023 Miami Race - Russell | 1444 | 1415 |   11 |   30 |  97.9% |  99.2% |     2.1% |     0.8% |
-|       2023 Miami Race - Norris |  503 |  501 |    0 |    2 |  99.6% | 100.0% |     0.4% |     0.0% |
-|       2023 Miami Race - Stroll | 1091 | 1083 |   21 |    8 |  99.3% |  98.1% |     0.7% |     1.9% |
-|      2023 Miami Race - Tsunoda |  655 |  649 |    0 |    5 |  99.2% | 100.0% |     0.8% |     0.0% |
-|   2023 Miami Race - Verstappen | 1027 | 1012 |    0 |   15 |  98.6% | 100.0% |     1.4% |     0.0% |
-|        2023 Miami Race - Sainz | 1443 | 1440 |   13 |    3 |  99.8% |  99.1% |     0.2% |     0.9% |
-|        2023 Miami Race - Albon |  545 |  521 |   15 |   24 |  95.7% |  97.3% |     4.3% |     2.7% |
-|   2023 Miami Race - Hulkenberg |  619 |  619 |   17 |    0 | 100.0% |  97.3% |     0.0% |     2.7% |
-|         2023 Miami Race - Ocon |  605 |  600 |   78 |    5 |  99.2% |  88.5% |     0.8% |    11.5% |
-|     2023 Miami Race - Hamilton | 1261 | 1240 |   10 |   21 |  98.3% |  99.2% |     1.7% |     0.8% |
-|       2023 Miami Race - Alonso | 1162 | 1137 |    0 |   25 |  97.9% | 100.0% |     2.1% |     0.0% |
-|       2023 Miami Race - Bottas |  579 |  578 |    0 |    1 |  99.9% | 100.0% |     0.1% |     0.0% |
-|      2023 Miami Race - Piastri |  870 |  854 |    0 |   16 |  98.2% | 100.0% |     1.8% |     0.0% |
+|        2023 Monaco FP1 - Perez | 1132 | 1129 |    0 |    3 |  99.8% | 100.0% |     0.2% |     0.0% |
+|     2023 Miami Race - Sargeant | 1072 | 1049 |    0 |   23 |  97.9% | 100.0% |     2.1% |     0.0% |
+|        2023 Miami Race - Gasly | 1417 | 1318 |   22 |   99 |  93.0% |  98.3% |     7.0% |     1.7% |
+|        2023 Miami Race - Perez | 1014 |  983 |    5 |   31 |  97.0% |  99.5% |     3.0% |     0.5% |
+|      2023 Miami Race - Leclerc | 1203 | 1203 |    0 |    0 | 100.0% | 100.0% |     0.0% |     0.0% |
+|     2023 Miami Race - De Vries |  949 |  937 |    0 |   12 |  98.7% | 100.0% |     1.3% |     0.0% |
+|         2023 Miami Race - Zhou | 1076 | 1063 |    6 |   13 |  98.8% |  99.5% |     1.2% |     0.5% |
+|    2023 Miami Race - Magnussen | 1018 | 1006 |    7 |   13 |  98.8% |  99.3% |     1.2% |     0.7% |
+|      2023 Miami Race - Russell | 1431 | 1394 |    8 |   37 |  97.4% |  99.4% |     2.6% |     0.6% |
+|       2023 Miami Race - Norris |  504 |  502 |    0 |    2 |  99.6% | 100.0% |     0.4% |     0.0% |
+|       2023 Miami Race - Stroll | 1110 | 1104 |    0 |    6 |  99.5% | 100.0% |     0.5% |     0.0% |
+|      2023 Miami Race - Tsunoda |  672 |  667 |    0 |    5 |  99.3% | 100.0% |     0.7% |     0.0% |
+|   2023 Miami Race - Verstappen | 1032 | 1019 |    0 |   13 |  98.8% | 100.0% |     1.2% |     0.0% |
+|        2023 Miami Race - Sainz | 1442 | 1432 |    8 |   10 |  99.3% |  99.4% |     0.7% |     0.6% |
+|        2023 Miami Race - Albon |  544 |  516 |    1 |   28 |  94.9% |  99.9% |     5.1% |     0.1% |
+|   2023 Miami Race - Hulkenberg |  611 |  611 |   17 |    0 | 100.0% |  97.2% |     0.0% |     2.8% |
+|         2023 Miami Race - Ocon |  596 |  593 |   14 |    3 |  99.5% |  97.7% |     0.5% |     2.3% |
+|     2023 Miami Race - Hamilton | 1256 | 1228 |   10 |   28 |  97.7% |  99.2% |     2.3% |     0.8% |
+|       2023 Miami Race - Alonso | 1140 | 1114 |    0 |   27 |  97.6% | 100.0% |     2.4% |     0.0% |
+|       2023 Miami Race - Bottas |  572 |  570 |    0 |    2 |  99.6% | 100.0% |     0.4% |     0.0% |
+|      2023 Miami Race - Piastri |  756 |  680 |    0 |   75 |  90.0% | 100.0% |    10.0% |     0.0% |
 
 => Aggregate stats 
 
-Total speech duration  (P): 20652.7 sec
-True positives        (TP): 20354.3 sec
-False positives       (FP):   300.9 sec
-False negatives       (FN):   298.5 sec    Min.    Avg.    Max. 
-True positive rate   (TPR):    98.6%  |   95.7% / 98.6% /100.0% 
-Precision            (PPV):    98.5%  |   88.5% / 98.5% /100.0% 
-False negative rate  (FNR):     1.4%  |    0.0% /  1.4% /  4.3% 
-False discovery rate (FDR):     1.5%  |    0.0% /  1.5% / 11.5% 
-F-Score (β =  0.70)       :    98.5% 
-Fowlkes-Mallows index     :    98.5% 
+Total speech duration  (P): 20547.6 sec
+True positives        (TP): 20118.3 sec
+False positives       (FP):    98.7 sec
+False negatives       (FN):   429.3 sec    Min.    Avg.    Max. 
+True positive rate   (TPR):    97.9%  |   90.0% / 98.0% /100.0% 
+Precision            (PPV):    99.5%  |   97.2% / 99.5% /100.0% 
+False negative rate  (FNR):     2.1%  |    0.0% /  2.0% / 10.0% 
+False discovery rate (FDR):     0.5%  |    0.0% /  0.5% /  2.8% 
+F-Score (β =  0.70)       :    99.0% 
+Fowlkes-Mallows index     :    98.7% 
 
 ________________________________________________________
-Executed in  387.73 secs    fish           external
-   usr time  130.29 mins    0.00 micros  130.29 mins
-   sys time    0.68 mins  336.00 micros    0.68 mins
+Executed in  392.35 secs    fish           external
+   usr time  132.74 mins    0.00 micros  132.74 mins
+   sys time    0.55 mins  209.00 micros    0.55 mins
 ```
 
 # Cloning

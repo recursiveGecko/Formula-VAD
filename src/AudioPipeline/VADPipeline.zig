@@ -18,30 +18,17 @@ const audio_utils = @import("../audio_utils.zig");
 const Self = @This();
 
 pub const Config = struct {
-    fft_size: usize = 2048,
-    use_denoiser: bool = true,
+    fft_size: usize = 1024,
     vad_machine_config: VADMachine.Config = .{},
     // Alternative state machine configs for training
     alt_vad_machine_configs: ?[]const VADMachine.Config = null,
 };
 
-pub const VADSpeechSegment = struct {
+pub const SpeechSegment = struct {
     sample_from: usize,
     sample_to: usize,
-    debug_rnn_vad: f32,
-    debug_avg_speech_vol_ratio: f32,
-};
-
-pub const VADMachineResult = struct {
-    pub const RecordingState = enum {
-        none,
-        started,
-        completed,
-        aborted,
-    };
-
-    recording_state: RecordingState,
-    sample_number: u64,
+    avg_channel_vol_ratio: f32,
+    vad_met_sec: f32,
 };
 
 allocator: Allocator,
@@ -168,11 +155,7 @@ fn collectInputStep(self: *Self) !void {
         };
         var analyzed_step_result = self.buffered_volume_analyzer.write(&input_step_result);
 
-        if (self.config.use_denoiser) {
-            try self.denoiserStep(&analyzed_step_result);
-        } else {
-            try self.fftStep(&analyzed_step_result);
-        }
+        try self.denoiserStep(&analyzed_step_result);
     }
 }
 
@@ -190,7 +173,7 @@ fn denoiserStep(
             .segment = denoised_result.denoised_segment.?,
             .metadata = denoised_result.metadata.?,
         };
-        
+
         try self.pipeline.pushDenoisedSamples(denoised_result.denoised_segment.?);
         try self.fftStep(&fft_input);
 
@@ -219,18 +202,21 @@ fn fftStep(
 
 fn stateMachineStep(
     self: *Self,
-    fft_step_result: *const BufferedFFT.Result,
+    fft_result: *const BufferedFFT.Result,
 ) !void {
-    const vad_result = try self.vad_machine.run(fft_step_result);
+    const vad_result = try self.vad_machine.run(fft_result);
 
     switch (vad_result.recording_state) {
         .started => {
+            log.info("Starting recording at: {d}", .{vad_result.sample_number});
             try self.pipeline.startRecording(vad_result.sample_number);
         },
         .completed => {
+            log.info("Completing recording at: {d}", .{vad_result.sample_number});
             try self.pipeline.endRecording(vad_result.sample_number, true);
         },
         .aborted => {
+            log.info("Aborting recording at: {d}", .{vad_result.sample_number});
             try self.pipeline.endRecording(vad_result.sample_number, false);
         },
         .none => {},
@@ -239,7 +225,7 @@ fn stateMachineStep(
     // Run the VAD machines for the alternative VADs (training)
     if (self.alt_vad_machines) |alt_vads| {
         for (alt_vads) |*alt_vad| {
-            _ = try alt_vad.run(fft_step_result);
+            _ = try alt_vad.run(fft_result);
         }
     }
 }

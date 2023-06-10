@@ -3,7 +3,7 @@ const log = std.log.scoped(.vad_sm);
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const RollingAverage = @import("../structures/RollingAverage.zig");
-const VAD = @import("./VAD.zig");
+const VADPipeline = @import("./VADPipeline.zig");
 const BufferedFFT = @import("./BufferedFFT.zig");
 
 const Self = @This();
@@ -15,10 +15,22 @@ pub const SpeechState = enum {
     closing,
 };
 
+pub const Result = struct {
+    pub const RecordingState = enum {
+        none,
+        started,
+        completed,
+        aborted,
+    };
+
+    recording_state: RecordingState,
+    sample_number: u64,
+};
+
 pub const Config = struct {
     /// Speech band
-    speech_min_freq: f32 = 100,
-    speech_max_freq: f32 = 1500,
+    speech_min_freq: f32 = 500,
+    speech_max_freq: f32 = 2000,
     /// Time span for tracking long-term volume in speech band and initial value
     long_term_speech_avg_sec: f32 = 180,
     initial_long_term_avg: ?f64 = 0.005,
@@ -26,11 +38,11 @@ pub const Config = struct {
     short_term_speech_avg_sec: f32 = 0.2,
     /// Primary trigger for speech when short term avg in denoised speech band is this
     /// many times higher than long term avg
-    speech_threshold_factor: f32 = 18,
+    speech_threshold_factor: f32 = 10,
     /// Secondary trigger that compares volume in L and R channels before denoising
     channel_vol_ratio_avg_sec: f32 = 0.5,
     channel_vol_ratio_threshold: f32 = 0.5,
-    /// Conditions need to be met for this many consecutive milliseconds before speech is triggered
+    /// Conditions need to be met for this many consecutive seconds before speech is triggered
     min_consecutive_sec_to_open: f32 = 0.2,
     /// Maximum gap where speech is still considered to be ongoing
     max_speech_gap_sec: f32 = 2,
@@ -49,20 +61,18 @@ long_term_speech_volume: RollingAverage,
 short_term_speech_volume: RollingAverage,
 channel_vol_ratio: RollingAverage,
 // Start and stop samples of the ongoing speech segment
-speech_start_index: u64 = 0,
-speech_end_index: u64 = 0,
-// RNNoise VAD for ongoing speech segments
-speech_rnn_vad: f32 = 0,
-speech_rnn_vad_count: usize = 0,
+speech_start_index: ?u64 = null,
+speech_end_index: ?u64 = null,
+// Volume ratio between channels for ongoing speech segments
+channel_vol_ratio_sum: f32 = 0,
+channel_vol_ratio_count: usize = 0,
+vad_threshold_met_cumulative_sec: f32 = 0,
 // Stores temporary results when calculating per-channel volumes
 temp_channel_volumes: []f32,
-// Volume ratio between channels for ongoing speech segments
-speech_vol_ratio: f32 = 0,
-speech_vol_ratio_count: usize = 0,
 /// End result - VAD segments
-vad_segments: std.ArrayList(VAD.VADSpeechSegment),
+vad_segments: std.ArrayList(VADPipeline.SpeechSegment),
 
-pub fn init(allocator: Allocator, config: Config, vad: VAD) !Self {
+pub fn init(allocator: Allocator, config: Config, vad: VADPipeline) !Self {
     const sample_rate = vad.sample_rate;
     const n_channels = vad.n_channels;
     const fft_size = vad.config.fft_size;
@@ -96,7 +106,7 @@ pub fn init(allocator: Allocator, config: Config, vad: VAD) !Self {
     const temp_channel_volumes = try allocator.alloc(f32, n_channels);
     errdefer allocator.free(temp_channel_volumes);
 
-    var vad_segments = try std.ArrayList(VAD.VADSpeechSegment).initCapacity(allocator, 100);
+    var vad_segments = try std.ArrayList(VADPipeline.SpeechSegment).initCapacity(allocator, 100);
     errdefer vad_segments.deinit();
 
     var self = Self{
@@ -126,7 +136,7 @@ pub fn deinit(self: *Self) void {
 pub fn run(
     self: *Self,
     fft_result: *const BufferedFFT.Result,
-) !VAD.VADMachineResult {
+) !Result {
     const sample_rate_f = @intToFloat(f32, self.sample_rate);
     const config = self.config;
 
@@ -166,10 +176,12 @@ pub fn run(
     }
 
     // VAD segment to emit after speech ends
-    var vad_machine_result: VAD.VADMachineResult = .{
+    var vad_machine_result: Result = .{
         .recording_state = .none,
         .sample_number = 0,
     };
+
+    const from_state: SpeechState = self.speech_state;
 
     // Speech state machine
     switch (self.speech_state) {
@@ -178,35 +190,29 @@ pub fn run(
                 self.speech_state = .opening;
                 self.speech_start_index = fft_result.index;
             }
-
-            self.trackSpeechStats(fft_result, .closed, self.speech_state);
         },
         .opening => {
-            const samples_since_opening = fft_result.index - self.speech_start_index;
+            const samples_since_opening = fft_result.index - self.speech_start_index.?;
             const opening_duration_met = samples_since_opening >= min_consecutive_to_open;
 
             if (threshold_met and opening_duration_met) {
                 self.speech_state = .open;
                 vad_machine_result = .{
                     .recording_state = .started,
-                    .sample_number = self.getOffsetRecordingStart(self.speech_start_index),
+                    .sample_number = self.getOffsetRecordingStart(self.speech_start_index.?),
                 };
             } else if (!threshold_met) {
                 self.speech_state = .closed;
             }
-
-            self.trackSpeechStats(fft_result, .opening, self.speech_state);
         },
         .open => {
             if (!threshold_met) {
                 self.speech_state = .closing;
                 self.speech_end_index = fft_result.index;
             }
-
-            self.trackSpeechStats(fft_result, .open, self.speech_state);
         },
         .closing => {
-            const samples_since_closing = fft_result.index - self.speech_end_index;
+            const samples_since_closing = fft_result.index - self.speech_end_index.?;
             const closing_duration_met = samples_since_closing >= max_gap_samples;
 
             if (threshold_met) {
@@ -215,74 +221,76 @@ pub fn run(
                 self.speech_state = .closed;
                 vad_machine_result = try self.onSpeechEnd();
             }
-
-            self.trackSpeechStats(fft_result, .closing, self.speech_state);
         },
     }
 
-    // log.debug(
-    //     "Speech threshold: {d: >10.5} Loudness: {d: >10.5}   Threshold: {any: >6}   Status: {s: >9}",
-    //     .{ threshold * 100, short_term * 100, threshold_met, @tagName(self.speech_state) },
-    // );
+    const to_state: SpeechState = self.speech_state;
+    self.trackSpeechStats(fft_result, threshold_met, from_state, to_state);
 
     return vad_machine_result;
 }
 
-/// Track RNNoise's own VAD score during speech segments
 fn trackSpeechStats(
     self: *Self,
     fft_result: *const BufferedFFT.Result,
+    threshold_met: bool,
     from_state: SpeechState,
     to_state: SpeechState,
 ) void {
+    const sample_rate_f = @intToFloat(f32, self.sample_rate);
+    const input_length_sec = @intToFloat(f32, fft_result.fft_size) / sample_rate_f;
+
     if (from_state == .closed and to_state == .opening) {
-        self.speech_rnn_vad = fft_result.vad_metadata.rnn_vad orelse 0;
-        self.speech_rnn_vad_count = 1;
-        self.speech_vol_ratio = fft_result.vad_metadata.volume_ratio orelse 0;
-        self.speech_vol_ratio_count = 1;
-    } else if (from_state == .opening or from_state == .open) {
-        self.speech_rnn_vad += fft_result.vad_metadata.rnn_vad orelse 0;
-        self.speech_rnn_vad_count += 1;
-        self.speech_vol_ratio += fft_result.vad_metadata.volume_ratio orelse 0;
-        self.speech_vol_ratio_count += 1;
+        self.channel_vol_ratio_sum = fft_result.vad_metadata.volume_ratio orelse 0;
+        self.channel_vol_ratio_count = 1;
+        self.vad_threshold_met_cumulative_sec = input_length_sec;
+    } else if (from_state == .open) {
+        self.channel_vol_ratio_sum += fft_result.vad_metadata.volume_ratio orelse 0;
+        self.channel_vol_ratio_count += 1;
+
+        if (threshold_met) {
+            self.vad_threshold_met_cumulative_sec += input_length_sec;
+        }
     }
 }
 
-fn onSpeechEnd(self: *Self) !VAD.VADMachineResult {
-    const sample_from = self.speech_start_index;
-    const sample_to = self.speech_end_index;
-    const length_samples = sample_to - sample_from;
-
+fn onSpeechEnd(self: *Self) !Result {
     const sample_rate_f = @intToFloat(f32, self.sample_rate);
+
+    const sample_from = self.speech_start_index.?;
+    const sample_to = self.speech_end_index.?;
+    const length_samples = sample_to - sample_from;
+    const length_sec = @intToFloat(f32, length_samples) / sample_rate_f;
+
     const config = self.config;
 
-    const length_realtime = @intToFloat(f32, length_samples) / sample_rate_f;
-    const speech_duration_met = length_realtime >= config.min_vad_duration_sec;
-
-    const avg_rnn_vad = self.speech_rnn_vad / @intToFloat(f32, self.speech_rnn_vad_count);
-    const avg_speech_vol_ratio = self.speech_vol_ratio / @intToFloat(f32, self.speech_vol_ratio_count);
+    const speech_duration_met = length_sec >= config.min_vad_duration_sec;
+    const avg_channel_vol_ratio = self.channel_vol_ratio_sum / @intToFloat(f32, self.channel_vol_ratio_count);
 
     if (speech_duration_met) {
-        const segment = VAD.VADSpeechSegment{
+        const segment = VADPipeline.SpeechSegment{
             .sample_from = self.getOffsetRecordingStart(sample_from),
             .sample_to = self.getOffsetRecordingEnd(sample_to),
-            .debug_rnn_vad = avg_rnn_vad,
-            .debug_avg_speech_vol_ratio = avg_speech_vol_ratio,
+            .avg_channel_vol_ratio = avg_channel_vol_ratio,
+            .vad_met_sec = self.vad_threshold_met_cumulative_sec,
         };
         _ = try self.vad_segments.append(segment);
 
-        const debug_len_s = @intToFloat(f32, length_samples) / sample_rate_f;
-
-        log.debug(
-            "VAD Segment: {d: >6.2}s  | Avg. RNNoise VAD: {d: >6.2}% | Avg. vol ratio: {d: >5.2} ",
-            .{ debug_len_s, avg_rnn_vad * 100, avg_speech_vol_ratio },
+        log.info(
+            "VAD Segment: {d: >6.2}s  | Avg. vol ratio: {d: >5.2} ({d: >4}) | Actual VAD duration: {d: >4.1}s ",
+            .{
+                length_sec,
+                avg_channel_vol_ratio,
+                self.channel_vol_ratio_count,
+                self.vad_threshold_met_cumulative_sec,
+            },
         );
     }
 
     if (speech_duration_met) {
         return .{
             .recording_state = .completed,
-            .sample_number = self.getOffsetRecordingEnd(self.speech_end_index),
+            .sample_number = self.getOffsetRecordingEnd(sample_to),
         };
     } else {
         return .{
@@ -292,7 +300,7 @@ fn onSpeechEnd(self: *Self) !VAD.VADMachineResult {
     }
 }
 
-/// Add a couple of seconds of margin to the start of the segment 
+/// Add a couple of seconds of margin to the start of the segment
 pub fn getOffsetRecordingStart(self: Self, vad_from: u64) u64 {
     const sample_rate_f = @intToFloat(f32, self.sample_rate);
     const start_buffer = @floatToInt(usize, sample_rate_f * 2);
@@ -300,7 +308,7 @@ pub fn getOffsetRecordingStart(self: Self, vad_from: u64) u64 {
     return record_from;
 }
 
-/// Add a couple of seconds of margin to the end of the segment 
+/// Add a couple of seconds of margin to the end of the segment
 pub fn getOffsetRecordingEnd(self: Self, vad_to: u64) u64 {
     const sample_rate_f = @intToFloat(f32, self.sample_rate);
     const end_buffer = @floatToInt(usize, sample_rate_f * 2);

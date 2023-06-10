@@ -28,7 +28,7 @@
       "name": "Debug - Formula-VAD (Simulator)",
       "program": "${workspaceFolder}/zig-out/bin/simulator",
       "args": [
-        "-i", "tmp/plan.json",
+        "-i", "tmp/plan.small.json",
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Build formula-vad.zig"

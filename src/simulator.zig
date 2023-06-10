@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
-const VAD = @import("AudioPipeline/VAD.zig");
+const VADPipeline = @import("AudioPipeline/VADPipeline.zig");
 const clap = @import("clap");
 const Evaluator = @import("Evaluator.zig");
 const SimulationInstance = @import("./simulator/SimulationInstance.zig");
@@ -20,10 +20,10 @@ const seconds_per_hour = 3600;
 
 /// stdlib option overrides
 pub const std_options = struct {
-    pub const log_level = .info;
+    pub const log_level = .warn;
     pub const log_scope_levels = &.{
         .{
-            .scope = .vad,
+            .scope = .vad_sm,
             .level = .info,
         },
     };
@@ -35,7 +35,7 @@ const StaticSimConfig = struct {
 pub const static_sim_config = StaticSimConfig{};
 
 pub const DynamicSimConfig = struct {
-    vad_config: VAD.Config = .{},
+    vad_config: VADPipeline.Config = .{},
     output_dir: ?[]const u8 = null,
 
     /// Whether to preload audio into memory or stream it
