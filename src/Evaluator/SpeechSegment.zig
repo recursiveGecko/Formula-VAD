@@ -53,5 +53,5 @@ pub fn findOverlapping(allocator: Allocator, target: *Self, others: []Self) ![]*
 
 pub fn sortByStart(_ctx: void, lhs: Self, rhs: Self) bool {
     _ = _ctx;
-    return lhs.from_sec <= rhs.from_sec;
+    return lhs.from_sec < rhs.from_sec;
 }
