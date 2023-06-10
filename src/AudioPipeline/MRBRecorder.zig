@@ -2,14 +2,14 @@
 //! correctly recording audio from a MultiRingBuffer as
 //! new samples are written to it, ensuring that samples
 //! are not overwritten before they are recorded.
-//! 
+//!
 //! It also allows for recording to be stopped at a future sample index,
 //! at which point the recording is automatically finalized.
-//! 
+//!
 //! After recording is finalized, MRBRecorder calls the provided callback,
 //! passing it the recorded audio as an AudioBuffer which the CALLEE
 //! must deinit/free.
-//! 
+//!
 const std = @import("std");
 const log = std.log.scoped(.mrb_recorder);
 const assert = std.debug.assert;
@@ -74,10 +74,31 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn startRecording(self: *Self, from_sample: u64) !void {
+    if (self.end_recording_on_sample != null) {
+        log.info(
+            "Recording was scheduled to stop at sample {d} but has been restarted at sample {d}",
+            .{ self.end_recording_on_sample.?, from_sample },
+        );
+        self.end_recording_on_sample = null;
+    }
+
     self.recorder.start(from_sample);
 }
 
 pub fn stopRecording(self: *Self, to_sample: u64, keep: bool) !void {
+    if (!self.recorder.isRecording()) {
+        log.err("stopRecording() was called but recording is not in progress", .{});
+        return error.NotRecording;
+    }
+
+    if (keep and self.recorder.startIndex() > to_sample) {
+        log.err(
+            "stopRecording() was called with to_sample {} before startIndex {}",
+            .{ to_sample, self.recorder.startIndex() },
+        );
+        return error.EndIndexBeforeStart;
+    }
+
     if (keep) {
         // Schedule the recording to be finalized after we record the specified sample index.
         self.end_recording_on_sample = to_sample;
@@ -122,11 +143,13 @@ fn maybeRecordBuffer(self: *Self, suggested_to_idx: usize) !void {
     const last_recorded_idx = self.recorder.endIndex();
     if (suggested_to_idx <= last_recorded_idx) return;
 
-    // Ensure we don't try to record samples beyond what we have available.
     const record_to_idx = @min(
         suggested_to_idx,
         self.multi_ring_buffer.total_write_count,
     );
+    // If we already recorded everything we can currently record,
+    // there's nothing to do.
+    if (record_to_idx <= last_recorded_idx) return;
 
     var record_segment = Segment{
         .allocator = null,
@@ -144,7 +167,7 @@ fn maybeRecordBuffer(self: *Self, suggested_to_idx: usize) !void {
     try self.recorder.write(&record_segment);
 }
 
-/// Tries to finalize the recording if we have the samples we need, 
+/// Tries to finalize the recording if we have the samples we need,
 /// tries to record the missing samples otherwise.
 fn maybeFinalizeRecording(self: *Self) !void {
     // If we're not recording, or not in the process of finalizing, there's nothing to do.
@@ -167,7 +190,10 @@ fn maybeFinalizeRecording(self: *Self) !void {
     self.end_recording_on_sample = null;
 
     // Finalize the recording and call the callback with the recorded audio buffer.
-    var maybe_audio_buffer = try self.recorder.finalize(finalize_after_idx, true);
+    var maybe_audio_buffer = self.recorder.finalize(finalize_after_idx, true) catch |err| {
+        log.err("Failed to finalize recording: {any}", .{err});
+        return err;
+    };
 
     if (maybe_audio_buffer) |*audio_buffer| {
         self.recording_cb(self.recording_cb_ctx, audio_buffer);
