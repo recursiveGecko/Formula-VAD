@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.recorder);
 const Allocator = std.mem.Allocator;
 const Segment = @import("./Segment.zig");
 const SegmentWriter = @import("./SegmentWriter.zig");
@@ -50,6 +51,8 @@ pub fn endIndex(self: Self) u64 {
 }
 
 pub fn start(self: *Self, start_index: u64) void {
+    log.info("Starting recording. start_index: {d}", .{start_index});
+
     self.segment_writer.segment.index = start_index;
     self.segment_writer.write_index = 0;
     self.status = .recording;
@@ -69,12 +72,27 @@ pub fn write(self: *Self, segment: *const Segment) !void {
 }
 
 pub fn finalize(self: *Self, to_frame: u64, keep: bool) !?AudioBuffer {
-    self.status = .idle;
-    defer self.segment_writer.write_index = 0;
+    defer {
+        self.segment_writer.write_index = 0;
+        self.status = .idle;
+    }
+
+    log.info("Finalizing recording. to_frame: {d}, keep: {}", .{ to_frame, keep });
 
     if (keep) {
-        // Data needs to be written before finalize() is called.
-        if (to_frame < self.endIndex()) return error.MissingData;
+        const recording_start_idx = self.startIndex();
+        const last_recorded_idx = self.endIndex();
+
+        if (to_frame > last_recorded_idx) {
+            log.err("Recorder is missing data. to_frame: {d}, last_recorded_idx: {d}", .{ to_frame, last_recorded_idx });
+            // Data needs to be written before finalize() is called.
+            return error.MissingData;
+        }
+
+        if (to_frame < recording_start_idx) {
+            log.err("Recording end index before start. to_frame: {d}, recording_start_idx: {d}", .{ to_frame, recording_start_idx });
+            return error.InvalidEndIndex;
+        }
 
         const n_to_keep = to_frame - self.startIndex();
         try self.segment_writer.resize(n_to_keep);
@@ -87,7 +105,7 @@ pub fn finalize(self: *Self, to_frame: u64, keep: bool) !?AudioBuffer {
         self.last_recording_end_index = to_frame;
         return audio_buffer;
     } else {
-        // If we're not keeping the data, we can just reset the write index.
+        // If we're not keeping the data, we can just reset the write index. (defer above)
         return null;
     }
 }
