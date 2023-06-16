@@ -32,7 +32,12 @@ pub fn linkPackage(
 
     const pkg = b.createModule(.{
         .source_file = .{ .path = thisFileDir() ++ "/src/package.zig" },
-        .dependencies = &.{},
+        .dependencies = &.{
+            .{
+                .name = "onnxruntime",
+                .module = onnx.createModule(b),
+            }
+        },
     });
 
     exe.addModule("formula_vad", pkg);
