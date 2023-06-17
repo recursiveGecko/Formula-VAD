@@ -25,8 +25,8 @@ const exit = std.os.exit;
 const stdin = std.io.getStdIn();
 const stderr = std.io.getStdErr();
 const stdout = std.io.getStdOut();
-const stdin_r = stdout.reader();
-const stderr_w = stdout.writer();
+const stdin_r = stdin.reader();
+const stderr_w = stderr.writer();
 const stdout_w = stdout.writer();
 
 const CommandAction = enum {
