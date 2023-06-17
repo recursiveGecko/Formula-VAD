@@ -29,13 +29,13 @@ const stdin_r = stdout.reader();
 const stderr_w = stdout.writer();
 const stdout_w = stdout.writer();
 
-const CommandName = enum {
+const CommandAction = enum {
     segment,
     skip_segment,
 };
 
 const InCommandJSON = struct {
-    name: CommandName,
+    action: CommandAction,
     file_path: ?[]const u8 = null,
     playhead_timestamp_ms: ?u64 = null,
 };
@@ -188,7 +188,7 @@ fn processCommand(
     process_loop: *ProcessLoopState,
     command: InCommandJSON,
 ) !void {
-    switch (command.name) {
+    switch (command.action) {
         .segment => {
             try processSegment(arena_alloc, process_loop, command);
         },
