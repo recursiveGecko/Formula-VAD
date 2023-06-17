@@ -41,7 +41,7 @@ const InCommandJSON = struct {
 };
 
 const OutRecordingJSON = struct {
-    action: [] const u8 = "recording",
+    action: []const u8 = "recording",
     name: []const u8,
     file_path: []const u8,
     playhead_timestamp_ms: i64,
@@ -49,7 +49,7 @@ const OutRecordingJSON = struct {
 };
 
 const OutErrorJSON = struct {
-    action: [] const u8 = "error",
+    action: []const u8 = "error",
     message: []const u8,
     fatal: bool,
 };
@@ -172,13 +172,12 @@ pub fn startProcessLoop(process_loop: *ProcessLoopState) !void {
         defer _ = arena.reset(.retain_capacity);
 
         const line = stdin_r.readUntilDelimiterAlloc(arena_alloc, '\n', megabyte) catch |err| {
-            if (err == error.EndOfStream) {
-                log.err("Standard input closed, exiting", .{});
-                exit(0);
-            }
+            const msg = try fmt.allocPrint(arena_alloc, "Error reading from standard input: {any}.", .{err});
+            reportError(arena_alloc, msg, true);
 
-            const msg = try fmt.allocPrint(arena_alloc, "Error reading from stdin: {any}", .{err});
-            reportError(arena_alloc, msg, false);
+            if (err != error.StreamTooLong) {
+                exit(1);
+            }
             continue;
         };
 
