@@ -35,6 +35,7 @@ last_sample: f32 = 0,
 pub fn init(
     allocator: std.mem.Allocator,
     sample_rate: usize,
+    model_path: [:0]const u8,
 ) !Self {
     var fwd_fft = try FFT.init(allocator, n_fft, sample_rate, false);
     errdefer fwd_fft.deinit();
@@ -52,7 +53,7 @@ pub fn init(
     const onnx_opts = onnx.OnnxInstanceOpts{
         .log_id = "ZIG",
         .log_level = .warning,
-        .model_path = "data/nsnet2-20ms-baseline.onnx",
+        .model_path = model_path,
         .input_names = &.{"input"},
         .output_names = &.{"output"},
     };

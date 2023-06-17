@@ -22,6 +22,7 @@ pub const Config = struct {
     vad_machine_config: VADMachine.Config = .{},
     // Alternative state machine configs for training
     alt_vad_machine_configs: ?[]const VADMachine.Config = null,
+    denoiser_model_path: [:0]const u8 = "data/nsnet2-20ms-baseline.onnx",
 };
 
 pub const SpeechSegment = struct {
@@ -75,7 +76,12 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     var buffered_volume_analyzer = try BufferedVolumeAnalyzer.init(allocator);
     errdefer buffered_volume_analyzer.deinit();
 
-    var buffered_denoiser = try BufferedDenoiser.init(allocator, n_channels, sample_rate);
+    var buffered_denoiser = try BufferedDenoiser.init(
+        allocator,
+        n_channels,
+        sample_rate,
+        config.denoiser_model_path,
+    );
     errdefer buffered_denoiser.deinit();
 
     var buffered_fft = try BufferedFFT.init(allocator, .{

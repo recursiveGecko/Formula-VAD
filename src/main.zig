@@ -41,6 +41,7 @@ const InCommandJSON = struct {
 };
 
 const OutRecordingJSON = struct {
+    action: [] const u8 = "recording",
     name: []const u8,
     file_path: []const u8,
     playhead_timestamp_ms: i64,
@@ -48,6 +49,7 @@ const OutRecordingJSON = struct {
 };
 
 const OutErrorJSON = struct {
+    action: [] const u8 = "error",
     message: []const u8,
     fatal: bool,
 };
@@ -71,6 +73,7 @@ const cli_params = clap.parseParamsComptime(
     \\-h, --help                Display this help and exit
     \\-o, --outdir <string>     Output directory
     \\-n, --name <string>       Name of this instance for logging
+    \\--denoiser <string>       Path to denoiser ONNX model
     \\
 );
 
@@ -100,7 +103,7 @@ pub fn main() !void {
         return;
     }
 
-    if (args.name == null or args.outdir == null) {
+    if (args.name == null or args.outdir == null or args.denoiser == null) {
         try printHelp();
         exit(1);
     }
@@ -121,10 +124,16 @@ pub fn main() !void {
         .out_dir = out_dir,
     };
 
+    const denoiser_model_path = try allocator.dupeZ(u8, args.denoiser.?);
+    defer allocator.free(denoiser_model_path);
+
     const pipeline_config = AudioPipeline.Config{
         .sample_rate = 48000,
         .n_channels = 2,
         .buffer_length = 48000 * 10,
+        .vad_config = AudioPipeline.VADPipeline.Config{
+            .denoiser_model_path = denoiser_model_path,
+        },
     };
 
     var process_loop = ProcessLoopState{

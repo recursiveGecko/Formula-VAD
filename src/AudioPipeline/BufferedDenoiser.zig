@@ -27,6 +27,7 @@ pub fn init(
     allocator: Allocator,
     n_channels: usize,
     sample_rate: usize,
+    model_path: [:0]const u8,
 ) !Self {
     const temp_result_segment = try Segment.initWithCapacity(
         allocator,
@@ -36,7 +37,7 @@ pub fn init(
 
     var denoisers = try allocator.alloc(NSNet2, n_channels);
     for (0..n_channels) |i| {
-        denoisers[i] = try NSNet2.init(allocator, sample_rate);
+        denoisers[i] = try NSNet2.init(allocator, sample_rate, model_path);
     }
     errdefer {
         for (0..n_channels) |i| denoisers[i].deinit();
