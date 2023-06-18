@@ -348,9 +348,8 @@ fn onRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
         @intCast(i64, audio_buffer.global_start_frame_number.?) -
         @intCast(i64, process_loop.correlated_sample_index);
 
-    const ms_since_correlation =
-        1000 * @divTrunc(
-        @intCast(i64, samples_since_correlation),
+    const ms_since_correlation = @divTrunc(
+        @intCast(i64, 1000 * samples_since_correlation),
         @intCast(i64, audio_buffer.sample_rate),
     );
 
@@ -358,7 +357,7 @@ fn onRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
         @intCast(i64, process_loop.correlated_timestamp_ms) +
         ms_since_correlation;
 
-    // Notify the parent process that a new recording is available via stdout
+    // Notify the parent process that a new recording is available
     const out = OutRecordingJSON{
         .file_path = path,
         .name = process_loop.config.name,
