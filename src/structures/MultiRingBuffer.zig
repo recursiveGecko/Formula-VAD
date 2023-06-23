@@ -169,7 +169,7 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
 
             // Valid slicing range
             const max_abs_idx = self.total_write_count;
-            const min_abs_idx = if (max_abs_idx >= self.capacity) max_abs_idx - self.capacity else 0;
+            const min_abs_idx = max_abs_idx - @min(self.capacity, max_abs_idx);
 
             if (abs_to <= abs_from) {
                 return error.InvalidRange;

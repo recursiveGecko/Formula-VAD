@@ -46,6 +46,7 @@ const OutRecordingJSON = struct {
     file_path: []const u8,
     playhead_timestamp_ms: i64,
     duration_ms: u64,
+    speech_duration_ms: u64,
 };
 
 const OutErrorJSON = struct {
@@ -363,6 +364,8 @@ fn onRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
         .name = process_loop.config.name,
         .playhead_timestamp_ms = playhead_timestamp_ms,
         .duration_ms = duration_ms,
+        // TODO: This is approximate, we could do better by exposing the internal VAD figure
+        .speech_duration_ms = duration_ms - @min(duration_ms, 3500),
     };
     const out_json = std.json.stringifyAlloc(arena_alloc, out, .{}) catch |err| {
         const msg = fmt.allocPrint(

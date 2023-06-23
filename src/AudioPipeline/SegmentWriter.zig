@@ -43,12 +43,12 @@ pub fn isFull(self: *Self) bool {
 /// When the return value is less than the length of the source buffer, it means that
 /// the buffer is full and the buffer segment should be used in some way before
 /// calling .reset(), followed by a second .write() with the offset returned from this call.
-pub fn write(self: *Self, other: *const Segment, offset: usize, max_write: ?usize) !usize {
+pub fn write(self: *Self, other: *const Segment, read_offset: usize, max_write: ?usize) !usize {
     var segment = self.segment;
 
     // Determine the capacity of the internal buffer
     const capacity = segment.length;
-    const remaining_capacity = if (self.write_index < capacity) capacity - self.write_index else 0;
+    const remaining_capacity = capacity - @min(self.write_index, capacity);
 
     if (remaining_capacity == 0) {
         return 0;
@@ -57,9 +57,9 @@ pub fn write(self: *Self, other: *const Segment, offset: usize, max_write: ?usiz
     // number of source samples we have left to write
     const other_rem = val: {
         if (max_write) |max_w| {
-            break :val @min(max_w, other.length - offset);
+            break :val @min(max_w, other.length - read_offset);
         } else {
-            break :val other.length - offset;
+            break :val other.length - read_offset;
         }
     };
     // number of source samples we can write before we fill the buffer
@@ -79,10 +79,10 @@ pub fn write(self: *Self, other: *const Segment, offset: usize, max_write: ?usiz
 
         // Source Segment could contain SplitSlices where both `.first` and `.second` half are populated
         // Determine the number of samples to copy from the `.first` half
-        const n_from_first = if (src_chan.first.len > offset) @min(to_write, src_chan.first.len - offset) else 0;
+        const n_from_first = if (src_chan.first.len > read_offset) @min(to_write, src_chan.first.len - read_offset) else 0;
         if (n_from_first > 0) {
             const dst_from = self.write_index;
-            const src_from = offset;
+            const src_from = read_offset;
 
             var dst_buf = dst_chan.first[dst_from .. dst_from + n_from_first];
             var src_buf = src_chan.first[src_from .. src_from + n_from_first];
@@ -95,7 +95,7 @@ pub fn write(self: *Self, other: *const Segment, offset: usize, max_write: ?usiz
             const rem = to_write - n_from_first;
 
             const dst_from = self.write_index + n_from_first;
-            const src_from = if (offset >= src_chan.first.len) offset - src_chan.first.len else 0;
+            const src_from = read_offset - @min(src_chan.first.len, read_offset);
 
             var dst_buf = dst_chan.first[dst_from .. dst_from + rem];
             var src_buf = src_chan.second[src_from .. src_from + rem];
