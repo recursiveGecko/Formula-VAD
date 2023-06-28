@@ -22,7 +22,7 @@ pub const Config = struct {
     vad_machine_config: VADMachine.Config = .{},
     // Alternative state machine configs for training
     alt_vad_machine_configs: ?[]const VADMachine.Config = null,
-    denoiser_model_path: [:0]const u8 = "data/nsnet2-20ms-baseline.onnx",
+    denoiser_model_path: ?[:0]const u8 = null,
 };
 
 pub const SpeechSegment = struct {

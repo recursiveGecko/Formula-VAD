@@ -27,7 +27,7 @@ pub fn init(
     allocator: Allocator,
     n_channels: usize,
     sample_rate: usize,
-    model_path: [:0]const u8,
+    model_path: ?[:0]const u8,
 ) !Self {
     const temp_result_segment = try Segment.initWithCapacity(
         allocator,

@@ -304,7 +304,7 @@ fn onSpeechEnd(self: *Self) !Result {
 pub fn getOffsetRecordingStart(self: Self, vad_from: u64) u64 {
     const sample_rate_f = @intToFloat(f32, self.sample_rate);
     const start_buffer = @floatToInt(usize, sample_rate_f * 2);
-    const record_from = if (start_buffer > vad_from) 0 else vad_from - start_buffer;
+    const record_from = vad_from - @min(start_buffer, vad_from);
     return record_from;
 }
 
