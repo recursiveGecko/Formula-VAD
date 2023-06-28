@@ -189,6 +189,7 @@ pub fn run(
             if (threshold_met) {
                 self.speech_state = .opening;
                 self.speech_start_index = fft_result.index;
+                log.debug("Speech opening at sample {d}", .{self.speech_start_index.?});
             }
         },
         .opening => {
@@ -201,14 +202,17 @@ pub fn run(
                     .recording_state = .started,
                     .sample_number = self.getOffsetRecordingStart(self.speech_start_index.?),
                 };
+                log.debug("Speech open", .{});
             } else if (!threshold_met) {
                 self.speech_state = .closed;
+                log.debug("Speech cancelled", .{});
             }
         },
         .open => {
             if (!threshold_met) {
                 self.speech_state = .closing;
                 self.speech_end_index = fft_result.index;
+                log.debug("Speech ending at sample {d}", .{self.speech_end_index.?});
             }
         },
         .closing => {
@@ -217,8 +221,10 @@ pub fn run(
 
             if (threshold_met) {
                 self.speech_state = .open;
+                log.debug("Speech resumed", .{});
             } else if (closing_duration_met) {
                 self.speech_state = .closed;
+                log.debug("Speech ended", .{});
                 vad_machine_result = try self.onSpeechEnd();
             }
         },

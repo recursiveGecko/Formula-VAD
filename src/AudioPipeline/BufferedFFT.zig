@@ -146,7 +146,7 @@ pub fn write(
         };
     }
 
-    defer self.buffer.reset(input.segment.index + n_written);
+    defer self.buffer.reset(input.segment.index + input_offset + n_written);
     try self.fft(self.buffer.segment, &self.temp_result);
 
     self.temp_result.index = self.buffer.segment.index;

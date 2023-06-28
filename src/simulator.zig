@@ -26,6 +26,10 @@ pub const std_options = struct {
             .scope = .vad_sm,
             .level = .warn,
         },
+        .{
+            .scope = .vad,
+            .level = .warn,
+        },
     };
 };
 
@@ -133,7 +137,7 @@ pub fn main() !void {
     try stdout_w.writeAll(report);
 
     // Save report
-    var report_path = try std.fs.path.join(allocator, &.{simulation.resolved_out_path.?, "report.txt"});
+    var report_path = try std.fs.path.join(allocator, &.{ simulation.resolved_out_path.?, "report.txt" });
     defer allocator.free(report_path);
     try std.fs.Dir.writeFile(fs.cwd(), report_path, report);
 }
