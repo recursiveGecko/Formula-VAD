@@ -321,10 +321,8 @@ fn onOriginalRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer)
 }
 
 fn onDenoisedRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
-    _ = audio_buffer;
-    _ = opaque_ctx;
-    // const process_loop: *ProcessLoopState = alignedPtrCast(opaque_ctx, ProcessLoopState);
-    // onRecording(process_loop, audio_buffer, .original);
+    const process_loop: *ProcessLoopState = alignedPtrCast(opaque_ctx, ProcessLoopState);
+    onRecording(process_loop, audio_buffer, .denoised);
 }
 
 fn onRecording(
@@ -332,13 +330,17 @@ fn onRecording(
     audio_buffer: *const AudioBuffer,
     rec_type: enum { original, denoised },
 ) void {
-    _ = rec_type;
     const arena_alloc = process_loop.callback_arena.allocator();
     defer _ = process_loop.callback_arena.reset(.retain_capacity);
 
     const out_dir = process_loop.config.out_dir;
 
-    const filename = fmt.allocPrint(arena_alloc, "{}.wav", .{uuid.newV4()}) catch unreachable;
+    const filename = fmt.allocPrint(
+        arena_alloc,
+        "{d}-{s}.ogg",
+        .{ audio_buffer.global_start_frame_number.?, @tagName(rec_type) },
+    ) catch unreachable;
+
     const path = fs.path.resolve(arena_alloc, &.{ out_dir, filename }) catch |err| {
         const msg = fmt.allocPrint(
             arena_alloc,
@@ -351,7 +353,7 @@ fn onRecording(
     };
 
     log.info("{s}: Saving recording to {s}", .{ process_loop.config.name, path });
-    audio_buffer.saveToFile(path, AudioBuffer.Format.wav) catch |err| {
+    audio_buffer.saveToFile(path, AudioBuffer.Format.vorbis, 1) catch |err| {
         const msg = fmt.allocPrint(
             arena_alloc,
             "Error saving audio file: {any}. Path: {s}, AudioBuffer: {any}",
@@ -361,6 +363,11 @@ fn onRecording(
         reportError(arena_alloc, msg, false);
         return;
     };
+
+    // Only notify the parent process of original recordings,
+    // or find a way to notify it about both original and denoised recordings
+    // in a single message
+    if (rec_type != .original) return;
 
     const duration_ms: u64 = @intFromFloat(audio_buffer.duration_seconds * 1000);
 

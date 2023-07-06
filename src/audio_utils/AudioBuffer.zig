@@ -58,7 +58,12 @@ pub fn loadFromFile(allocator: Allocator, path: []const u8) !Self {
     };
 }
 
-pub fn saveToFile(self: *const Self, path: []const u8, format: Format) !void {
+pub fn saveToFile(
+    self: *const Self,
+    path: []const u8,
+    format: Format,
+    quality: f64,
+) !void {
     const path_Z = try self.allocator.dupeZ(u8, path);
     defer self.allocator.free(path_Z);
 
@@ -72,8 +77,12 @@ pub fn saveToFile(self: *const Self, path: []const u8, format: Format) !void {
     defer _ = sndfile.sf_close(sf_file);
 
     if (format == .vorbis) {
-        var quality: f64 = 1;
-        var cmd_resut = sndfile.sf_command(sf_file, sndfile.SFC_SET_VBR_ENCODING_QUALITY, &quality, @sizeOf(f64));
+        var cmd_resut = sndfile.sf_command(
+            sf_file,
+            sndfile.SFC_SET_VBR_ENCODING_QUALITY,
+            @constCast(&quality),
+            @sizeOf(@TypeOf(quality)),
+        );
         assert(cmd_resut == 1);
     }
 

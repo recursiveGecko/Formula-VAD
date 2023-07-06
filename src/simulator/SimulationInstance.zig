@@ -23,7 +23,6 @@ const PipelineContext = struct {
     const Ctx = @This();
 
     sim_instance: *SimulationInstance,
-    recording_count: usize = 0,
 
     pub fn onOriginalRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
         const self = castToSelf(opaque_ctx);
@@ -44,12 +43,10 @@ const PipelineContext = struct {
 
         if (self.sim_instance.output_dir == null) return;
 
-        defer self.recording_count += 1;
-
         const audio_file_name = std.fmt.allocPrint(
             allocator,
-            "{d:0>3}-{s}-{s}.ogg",
-            .{ self.recording_count, self.sim_instance.name, @tagName(rec_type) },
+            "{d}-{s}.ogg",
+            .{ audio_buffer.global_start_frame_number.?, @tagName(rec_type) },
         ) catch |err| {
             log.err("Failed to allocate file name: {any}", .{err});
             return;
@@ -62,7 +59,7 @@ const PipelineContext = struct {
         };
         defer allocator.free(audio_path);
 
-        audio_buffer.saveToFile(audio_path, AudioBuffer.Format.vorbis) catch |err| {
+        audio_buffer.saveToFile(audio_path, AudioBuffer.Format.vorbis, 1) catch |err| {
             log.err("Failed to save file to disk: {any}", .{err});
             return;
         };
