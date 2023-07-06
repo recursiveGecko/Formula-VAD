@@ -73,7 +73,7 @@ pub inline fn interpolate(
         const fill_idx_f: f32 = @floatFromInt(i + 1);
         const fill_count_f: f32 = @floatFromInt(dest.len + 1);
         const frac = fill_idx_f / fill_count_f;
-        
+
         dest[i] = std.math.lerp(first, second, frac);
     }
 }

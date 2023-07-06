@@ -1,0 +1,25 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, stable ]
+  workflow_dispatch:
+
+env:
+  ZIG_VERSION: 0.11.0-dev.3937+78eb3c561
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+          lfs: true
+
+      - uses: goto-bus-stop/setup-zig@v2.1.0
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - run: zig build test
+      - run: zig fmt --check src
