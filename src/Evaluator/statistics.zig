@@ -152,7 +152,7 @@ pub fn aggregate(stats: []SingleStats) AggregateStats {
             agg.precision.max = s.precision;
     }
 
-    const n_stats_f = @intToFloat(f32, stats.len);
+    const n_stats_f: f32 = @floatFromInt(stats.len);
 
     agg.true_positive_rate.overall = agg.true_positives_sec / agg.total_positives_sec;
     agg.false_negative_rate.overall = agg.false_negatives_sec / agg.total_positives_sec;

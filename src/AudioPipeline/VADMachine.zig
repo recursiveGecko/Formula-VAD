@@ -74,13 +74,15 @@ vad_segments: std.ArrayList(VADPipeline.SpeechSegment),
 
 pub fn init(allocator: Allocator, config: Config, vad: VADPipeline) !Self {
     const sample_rate = vad.sample_rate;
+    const sample_rate_f: f32 = @floatFromInt(sample_rate);
     const n_channels = vad.n_channels;
     const fft_size = vad.config.fft_size;
+    const fft_size_f: f32 = @floatFromInt(fft_size);
 
-    const eval_per_sec = @intToFloat(f32, sample_rate) / @intToFloat(f32, fft_size);
-    const long_term_avg_len = @floatToInt(usize, eval_per_sec * config.long_term_speech_avg_sec);
-    const short_term_avg_len = @floatToInt(usize, eval_per_sec * config.short_term_speech_avg_sec);
-    const channel_vol_ratio_len = @floatToInt(usize, eval_per_sec * config.channel_vol_ratio_avg_sec);
+    const eval_per_sec = sample_rate_f / fft_size_f;
+    const long_term_avg_len: usize = @intFromFloat(eval_per_sec * config.long_term_speech_avg_sec);
+    const short_term_avg_len: usize = @intFromFloat(eval_per_sec * config.short_term_speech_avg_sec);
+    const channel_vol_ratio_len: usize = @intFromFloat(eval_per_sec * config.channel_vol_ratio_avg_sec);
 
     var long_term_speech_avg = try RollingAverage.init(
         allocator,
@@ -137,7 +139,7 @@ pub fn run(
     self: *Self,
     fft_result: *const BufferedFFT.Result,
 ) !Result {
-    const sample_rate_f = @intToFloat(f32, self.sample_rate);
+    const sample_rate_f: f32 = @floatFromInt(self.sample_rate);
     const config = self.config;
 
     // Find the average volume in the speech band
@@ -156,9 +158,9 @@ pub fn run(
     }
 
     // Number of consecutive samples above the threshold before the VAD opens
-    const min_consecutive_to_open = @floatToInt(usize, sample_rate_f * config.min_consecutive_sec_to_open);
+    const min_consecutive_to_open: usize = @intFromFloat(sample_rate_f * config.min_consecutive_sec_to_open);
     // Number of consecutive samples below the threshold before the VAD closes
-    const max_gap_samples = @floatToInt(usize, sample_rate_f * config.max_speech_gap_sec);
+    const max_gap_samples: usize = @intFromFloat(sample_rate_f * config.max_speech_gap_sec);
 
     // Use the minimum for activation as it's likely the one containing less engine noise, and therefore more accurate
     const short_term = self.short_term_speech_volume.push(min_volume);
@@ -243,8 +245,8 @@ fn trackSpeechStats(
     from_state: SpeechState,
     to_state: SpeechState,
 ) void {
-    const sample_rate_f = @intToFloat(f32, self.sample_rate);
-    const input_length_sec = @intToFloat(f32, fft_result.fft_size) / sample_rate_f;
+    const sample_rate_f: f32 = @floatFromInt(self.sample_rate);
+    const input_length_sec = @as(f32, @floatFromInt(fft_result.fft_size)) / sample_rate_f;
 
     if (from_state == .closed and to_state == .opening) {
         self.channel_vol_ratio_sum = fft_result.vad_metadata.volume_ratio orelse 0;
@@ -261,17 +263,17 @@ fn trackSpeechStats(
 }
 
 fn onSpeechEnd(self: *Self) !Result {
-    const sample_rate_f = @intToFloat(f32, self.sample_rate);
+    const sample_rate_f: f32 = @floatFromInt(self.sample_rate);
 
     const sample_from = self.speech_start_index.?;
     const sample_to = self.speech_end_index.?;
     const length_samples = sample_to - sample_from;
-    const length_sec = @intToFloat(f32, length_samples) / sample_rate_f;
+    const length_sec = @as(f32, @floatFromInt(length_samples)) / sample_rate_f;
 
     const config = self.config;
 
     const speech_duration_met = length_sec >= config.min_vad_duration_sec;
-    const avg_channel_vol_ratio = self.channel_vol_ratio_sum / @intToFloat(f32, self.channel_vol_ratio_count);
+    const avg_channel_vol_ratio = self.channel_vol_ratio_sum / @as(f32, @floatFromInt(self.channel_vol_ratio_count));
 
     if (speech_duration_met) {
         const segment = VADPipeline.SpeechSegment{
@@ -308,16 +310,16 @@ fn onSpeechEnd(self: *Self) !Result {
 
 /// Add a couple of seconds of margin to the start of the segment
 pub fn getOffsetRecordingStart(self: Self, vad_from: u64) u64 {
-    const sample_rate_f = @intToFloat(f32, self.sample_rate);
-    const start_buffer = @floatToInt(usize, sample_rate_f * 2);
+    const sample_rate_f: f32 = @floatFromInt(self.sample_rate);
+    const start_buffer: usize = @intFromFloat(sample_rate_f * 2);
     const record_from = vad_from - @min(start_buffer, vad_from);
     return record_from;
 }
 
 /// Add a couple of seconds of margin to the end of the segment
 pub fn getOffsetRecordingEnd(self: Self, vad_to: u64) u64 {
-    const sample_rate_f = @intToFloat(f32, self.sample_rate);
-    const end_buffer = @floatToInt(usize, sample_rate_f * 2);
+    const sample_rate_f: f32 = @floatFromInt(self.sample_rate);
+    const end_buffer: usize = @intFromFloat(sample_rate_f * 2);
     const record_to = vad_to + end_buffer;
     return record_to;
 }

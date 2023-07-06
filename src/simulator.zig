@@ -52,12 +52,12 @@ pub const Simulation = struct {
     allocator: Allocator,
     instances: []SimulationInstance,
     config: DynamicSimConfig = .{},
-    original_json: SimulationJSON,
+    original_json: std.json.Parsed(SimulationJSON),
     base_path: []const u8,
     resolved_out_path: ?[]const u8,
 
     pub fn deinit(self: *@This()) void {
-        std.json.parseFree(SimulationJSON, self.allocator, self.original_json);
+        self.original_json.deinit();
         if (self.resolved_out_path) |path| self.allocator.free(path);
         for (self.instances) |*instance| instance.deinit();
         self.allocator.free(self.instances);
@@ -149,13 +149,13 @@ pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
     const plan_contents = try fs.Dir.readFileAlloc(fs.cwd(), allocator, json_path, 10 * megabyte);
     defer allocator.free(plan_contents);
 
-    const plan_json: SimulationJSON = try std.json.parseFromSlice(SimulationJSON, allocator, plan_contents, .{
+    const plan_json = try std.json.parseFromSlice(SimulationJSON, allocator, plan_contents, .{
         .ignore_unknown_fields = true,
     });
 
     // If output dir was specified, create a timestamped output directory for this simulation
     var resolved_out_path: ?[]const u8 = val: {
-        if (plan_json.config.output_dir) |out_dir| {
+        if (plan_json.value.config.output_dir) |out_dir| {
             const subdir_name = try std.fmt.allocPrint(allocator, "{d}", .{std.time.timestamp()});
             const subdir_path = try fs.path.resolve(allocator, &.{ base_path, out_dir, subdir_name });
             defer allocator.free(subdir_name);
@@ -176,7 +176,7 @@ pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
     }
 
     // Allocate instances
-    var instances = try allocator.alloc(SimulationInstance, plan_json.instances.len);
+    var instances = try allocator.alloc(SimulationInstance, plan_json.value.instances.len);
     var instances_alloc: usize = 0;
     errdefer {
         for (0..instances_alloc) |i| instances[i].deinit();
@@ -184,7 +184,7 @@ pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
     }
 
     // Initialize instances, maybe creating output directories for each
-    for (plan_json.instances, 0..) |instance_json, i| {
+    for (plan_json.value.instances, 0..) |instance_json, i| {
         var out_dir = val: {
             if (resolved_out_path == null) break :val null;
 
@@ -198,7 +198,7 @@ pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
             base_path,
             out_dir,
             instance_json,
-            plan_json.config,
+            plan_json.value.config,
         );
         instances_alloc += 1;
     }
@@ -208,7 +208,7 @@ pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
 
     simulation.* = Simulation{
         .instances = instances,
-        .config = plan_json.config,
+        .config = plan_json.value.config,
         .original_json = plan_json,
         .base_path = base_path,
         .resolved_out_path = resolved_out_path,

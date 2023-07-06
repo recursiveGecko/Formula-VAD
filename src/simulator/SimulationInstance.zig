@@ -79,8 +79,7 @@ const PipelineContext = struct {
     }
 
     fn castToSelf(opaque_ctx: *anyopaque) *Ctx {
-        const aligned = @alignCast(@alignOf(Ctx), opaque_ctx);
-        return @ptrCast(*Ctx, aligned);
+        return @ptrCast(@alignCast(opaque_ctx));
     }
 };
 
@@ -238,8 +237,8 @@ pub fn storeResult(
     const sample_rate = self.audio_source.sampleRate();
 
     for (vad_segments, 0..) |vad_segment, i| {
-        const from_sec = @intToFloat(f32, vad_segment.sample_from) / @intToFloat(f32, sample_rate);
-        const to_sec = @intToFloat(f32, vad_segment.sample_to) / @intToFloat(f32, sample_rate);
+        const from_sec = @as(f32, @floatFromInt(vad_segment.sample_from)) / @as(f32, @floatFromInt(sample_rate));
+        const to_sec = @as(f32, @floatFromInt(vad_segment.sample_to)) / @as(f32, @floatFromInt(sample_rate));
 
         const debug_info = try std.fmt.allocPrint(
             self.main_thread_allocator,

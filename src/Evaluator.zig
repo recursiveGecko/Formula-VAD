@@ -110,8 +110,8 @@ pub fn initAndRun(
     std.mem.sort(SpeechSegment, input_copy, {}, SpeechSegment.sortByStart);
     std.mem.sort(SpeechSegment, reference_copy, {}, SpeechSegment.sortByStart);
 
-    for(0..input_copy.len) |i| input_copy[i].id = @intCast(i64, i + 1);
-    for(0..reference_copy.len) |i| reference_copy[i].id = @intCast(i64, i + 1);
+    for (0..input_copy.len) |i| input_copy[i].id = @intCast(i + 1);
+    for (0..reference_copy.len) |i| reference_copy[i].id = @intCast(i + 1);
 
     var prev: ?*SpeechSegment = null;
     for (self.input_segments) |*input_segment| {

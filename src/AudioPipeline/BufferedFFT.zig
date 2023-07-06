@@ -96,7 +96,7 @@ pub fn init(allocator: Allocator, config: Config) !Self {
     errdefer allocator.free(window);
     window_fn.hannWindowPeriodic(window);
 
-    const norm_factor = window_fn.windowNormFactor(window) / @intToFloat(f32, config.fft_size);
+    const norm_factor = window_fn.windowNormFactor(window) / @as(f32, @floatFromInt(config.fft_size));
 
     var complex_buffer = try allocator.alloc(FFT.Complex, fft_instance.binCount());
     errdefer allocator.free(complex_buffer);

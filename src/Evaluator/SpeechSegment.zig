@@ -7,7 +7,7 @@ const Self = @This();
 id: i64 = -1,
 from_sec: f32,
 to_sec: f32,
-side: enum{ vad, ref },
+side: enum { vad, ref },
 
 opposite_segments: ?[]*Self = null,
 next: ?*Self = null,

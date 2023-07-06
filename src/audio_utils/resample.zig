@@ -70,7 +70,10 @@ pub inline fn interpolate(
     dest: []f32,
 ) void {
     for (0..dest.len) |i| {
-        const frac = @intToFloat(f32, i + 1) / @intToFloat(f32, dest.len + 1);
+        const fill_idx_f: f32 = @floatFromInt(i + 1);
+        const fill_count_f: f32 = @floatFromInt(dest.len + 1);
+        const frac = fill_idx_f / fill_count_f;
+        
         dest[i] = std.math.lerp(first, second, frac);
     }
 }

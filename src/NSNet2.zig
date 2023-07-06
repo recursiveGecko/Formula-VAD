@@ -71,8 +71,8 @@ pub fn init(
     const adjusted_n_frames = n_frames + artifact_mitigation_window;
     var features_node_dimms: []const i64 = &.{
         1,
-        @intCast(i64, adjusted_n_frames),
-        @intCast(i64, n_bins),
+        @as(i64, @intCast(adjusted_n_frames)),
+        @as(i64, @intCast(n_bins)),
     };
     var features = try allocator.alloc(f32, adjusted_n_frames * n_bins);
     errdefer allocator.free(features);
@@ -93,8 +93,8 @@ pub fn init(
     //
     var gain_node_dimms: []const i64 = &.{
         1,
-        @intCast(i64, adjusted_n_frames),
-        @intCast(i64, n_bins),
+        @as(i64, @intCast(adjusted_n_frames)),
+        @as(i64, @intCast(n_bins)),
     };
     var gains = try allocator.alloc(f32, adjusted_n_frames * n_bins);
     errdefer allocator.free(gains);
@@ -320,7 +320,7 @@ fn reconstructAudio(
     const n_frames = specgram.len / n_bins;
 
     // Volume normalization factor
-    const vol_norm_factor: f32 = 1 / @intToFloat(f32, n_fft);
+    const vol_norm_factor: f32 = 1 / @as(f32, @floatFromInt(n_fft));
 
     for (0..n_frames) |frame_idx| {
         const in_start_idx = frame_idx * n_bins;

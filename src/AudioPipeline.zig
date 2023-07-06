@@ -84,7 +84,7 @@ pub fn init(
         allocator,
         &self.original_audio_buffer,
         config.sample_rate,
-        @ptrCast(*const MRBRecorder.RecordingCB, &onOriginalRecording),
+        @ptrCast(&onOriginalRecording),
         self,
     );
     errdefer self.original_audio_recorder.deinit();
@@ -93,7 +93,7 @@ pub fn init(
         allocator,
         &self.denoised_audio_buffer,
         config.sample_rate,
-        @ptrCast(*const MRBRecorder.RecordingCB, &onDenoisedRecording),
+        @ptrCast(&onDenoisedRecording),
         self,
     );
     errdefer self.denoised_audio_recorder.deinit();
@@ -185,7 +185,7 @@ pub fn startRecording(self: *Self, from_sample: usize) !void {
 }
 
 pub fn endRecording(self: *Self, to_sample: usize, keep: bool) !void {
-    log.info("Ending recording at sample {d}, keep: {}", .{to_sample, keep});
+    log.info("Ending recording at sample {d}, keep: {}", .{ to_sample, keep });
     try self.original_audio_recorder.stopRecording(to_sample, keep);
     try self.denoised_audio_recorder.stopRecording(to_sample, keep);
 }

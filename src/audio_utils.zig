@@ -19,6 +19,6 @@ pub fn rmsVolume(samples: SplitSlice(f32)) f32 {
     for (samples.second) |sample| {
         sum += sample * sample;
     }
-    const mean = sum / @intToFloat(f32, samples.len());
+    const mean = sum / @as(f32, @floatFromInt(samples.len()));
     return math.sqrt(mean);
 }

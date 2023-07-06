@@ -122,6 +122,6 @@ pub fn resize(self: *Self, new_size: usize) !void {
     for (self.channel_pcm_buf) |*channel| {
         try channel.resize(new_size, 0);
     }
-    
+
     self.length = new_size;
 }

@@ -54,7 +54,7 @@ pub fn loadFromFile(allocator: Allocator, path: []const u8) !Self {
         .sample_rate = stream.sample_rate,
         .channel_pcm_buf = channel_pcm_buf,
         .length = stream.length,
-        .duration_seconds = @intToFloat(f32, stream.length) / @intToFloat(f32, stream.sample_rate),
+        .duration_seconds = @as(f32, @floatFromInt(stream.length)) / @as(f32, @floatFromInt(stream.sample_rate)),
     };
 }
 
@@ -63,9 +63,9 @@ pub fn saveToFile(self: *const Self, path: []const u8, format: Format) !void {
     defer self.allocator.free(path_Z);
 
     var sf_info = std.mem.zeroInit(sndfile.SF_INFO, .{
-        .samplerate = @intCast(i32, self.sample_rate),
-        .channels = @intCast(i32, self.n_channels),
-        .format = @intCast(i32, @enumToInt(format)),
+        .samplerate = @as(i32, @intCast(self.sample_rate)),
+        .channels = @as(i32, @intCast(self.n_channels)),
+        .format = @as(i32, @intCast(@intFromEnum(format))),
     });
 
     var sf_file = sndfile.sf_open(path_Z.ptr, sndfile.SFM_WRITE, &sf_info);
@@ -95,10 +95,14 @@ pub fn saveToFile(self: *const Self, path: []const u8, format: Format) !void {
             }
         }
 
-        const frames_written = sndfile.sf_writef_float(sf_file, write_buffer.ptr, @intCast(i64, frames_to_write));
+        const frames_written = sndfile.sf_writef_float(
+            sf_file,
+            write_buffer.ptr,
+            @intCast(frames_to_write),
+        );
         assert(frames_written == frames_to_write);
 
-        frames_read_count += @intCast(usize, frames_written);
+        frames_read_count += @intCast(frames_written);
     }
 }
 

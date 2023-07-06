@@ -50,8 +50,8 @@ pub fn init(
     errdefer allocator.free(buf_cpx);
 
     const kiss_cfg = kissfft.kiss_fftr_alloc(
-        @intCast(c_int, n_fft),
-        @boolToInt(mode_inverse),
+        @intCast(n_fft),
+        @intFromBool(mode_inverse),
         null,
         null,
     );
@@ -97,7 +97,7 @@ pub fn fft(
     }
 
     if (bins.len != self.binCount()) {
-        std.debug.print("bins.len: {} {}\n", .{bins.len, self.binCount()});
+        std.debug.print("bins.len: {} {}\n", .{ bins.len, self.binCount() });
         return error.InvalidResultLength;
     }
 
@@ -108,7 +108,7 @@ pub fn fft(
     kissfft.kiss_fftr(
         self.kiss_cfg,
         in_samples.ptr,
-        @ptrCast([*]kissfft.kiss_fft_cpx, bins.ptr),
+        @ptrCast(bins.ptr),
     );
 }
 
@@ -128,7 +128,7 @@ pub fn invFft(
     // Run FFT
     kissfft.kiss_fftri(
         self.kiss_cfg,
-        @ptrCast([*]const kissfft.kiss_fft_cpx, bins.ptr),
+        @ptrCast(bins.ptr),
         result.ptr,
     );
 }
@@ -140,15 +140,15 @@ pub fn binCount(self: Self) usize {
 
 /// Query the width of each bin in Hz
 pub fn binWidth(self: Self) f32 {
-    const sample_rate_f = @intToFloat(f32, self.sample_rate);
-    const n_fft_f = @intToFloat(f32, self.n_fft);
+    const sample_rate_f: f32 = @floatFromInt(self.sample_rate);
+    const n_fft_f: f32 = @floatFromInt(self.n_fft);
 
     return sample_rate_f / n_fft_f;
 }
 
 /// Query the Nyquist frequency of the FFT
 pub fn nyquistFreq(self: Self) f32 {
-    const sample_rate_f = @intToFloat(f32, self.sample_rate);
+    const sample_rate_f: f32 = @floatFromInt(self.sample_rate);
     return sample_rate_f / 2;
 }
 
@@ -163,7 +163,7 @@ pub fn freqToBin(self: Self, freq: f32) !usize {
     }
 
     const bin_f = @round(freq / self.binWidth());
-    return @floatToInt(usize, bin_f);
+    return @intFromFloat(bin_f);
 }
 
 /// Converts given FFT bin index to the corresponding frequency in Hz
@@ -174,7 +174,7 @@ pub fn binToFreq(self: Self, bin_index: usize) !f32 {
         return error.OutOfRange;
     }
 
-    const bin_f = @intToFloat(f32, bin_index);
+    const bin_f: f32 = @floatFromInt(bin_index);
     const bin_width = self.binWidth();
     return bin_f * bin_width;
 }

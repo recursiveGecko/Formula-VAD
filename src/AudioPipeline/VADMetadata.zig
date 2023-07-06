@@ -28,7 +28,7 @@ pub fn toResult(self: *Self) Result {
 
 pub fn push(self: *Self, values: anytype, weight_any: anytype) void {
     const weight = if (@typeInfo(@TypeOf(weight_any)) == .Int)
-        @intToFloat(f32, weight_any)
+        @as(f32, @floatFromInt(weight_any))
     else
         weight_any;
 

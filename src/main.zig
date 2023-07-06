@@ -34,12 +34,14 @@ const CommandAction = enum {
     skip_segment,
 };
 
+// Commands received from the parent process via stdin
 const InCommandJSON = struct {
     action: CommandAction,
     file_path: ?[]const u8 = null,
     playhead_timestamp_ms: ?u64 = null,
 };
 
+// Notification sent to the parent process via stdout
 const OutRecordingJSON = struct {
     action: []const u8 = "recording",
     name: []const u8,
@@ -49,6 +51,7 @@ const OutRecordingJSON = struct {
     speech_duration_ms: u64,
 };
 
+// Error sent to the parent process via stdout
 const OutErrorJSON = struct {
     action: []const u8 = "error",
     message: []const u8,
@@ -86,6 +89,7 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var allocator = gpa.allocator();
 
+    // Parse command line arguments
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &cli_params, clap.parsers.default, .{
         .diagnostic = &diag,
@@ -149,8 +153,8 @@ pub fn main() !void {
         pipeline_config,
         AudioPipeline.Callbacks{
             .ctx = &process_loop,
-            .on_original_recording = &onRecording,
-            .on_denoised_recording = null,
+            .on_original_recording = &onOriginalRecording,
+            .on_denoised_recording = &onDenoisedRecording,
         },
     );
     errdefer pipeline.deinit();
@@ -182,7 +186,7 @@ pub fn startProcessLoop(process_loop: *ProcessLoopState) !void {
             continue;
         };
 
-        const parsed = json.parseFromSlice(InCommandJSON, arena_alloc, line, .{}) catch |err| {
+        const parsed = json.parseFromSliceLeaky(InCommandJSON, arena_alloc, line, .{}) catch |err| {
             const msg = try fmt.allocPrint(arena_alloc, "Error parsing command JSON: {any}. Line: {s}", .{ err, line });
             reportError(arena_alloc, msg, false);
             continue;
@@ -311,9 +315,24 @@ fn reportError(
     stdout_w.print("{s}\n", .{out_json}) catch unreachable;
 }
 
-fn onRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
+fn onOriginalRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
     const process_loop: *ProcessLoopState = alignedPtrCast(opaque_ctx, ProcessLoopState);
+    onRecording(process_loop, audio_buffer, .original);
+}
 
+fn onDenoisedRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
+    _ = audio_buffer;
+    _ = opaque_ctx;
+    // const process_loop: *ProcessLoopState = alignedPtrCast(opaque_ctx, ProcessLoopState);
+    // onRecording(process_loop, audio_buffer, .original);
+}
+
+fn onRecording(
+    process_loop: *ProcessLoopState,
+    audio_buffer: *const AudioBuffer,
+    rec_type: enum { original, denoised },
+) void {
+    _ = rec_type;
     const arena_alloc = process_loop.callback_arena.allocator();
     defer _ = process_loop.callback_arena.reset(.retain_capacity);
 
@@ -343,19 +362,19 @@ fn onRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
         return;
     };
 
-    const duration_ms = @floatToInt(u64, audio_buffer.duration_seconds * 1000);
+    const duration_ms: u64 = @intFromFloat(audio_buffer.duration_seconds * 1000);
 
     const samples_since_correlation =
-        @intCast(i64, audio_buffer.global_start_frame_number.?) -
-        @intCast(i64, process_loop.correlated_sample_index);
+        @as(i64, @intCast(audio_buffer.global_start_frame_number.?)) -
+        @as(i64, @intCast(process_loop.correlated_sample_index));
 
     const ms_since_correlation = @divTrunc(
-        @intCast(i64, 1000 * samples_since_correlation),
-        @intCast(i64, audio_buffer.sample_rate),
+        @as(i64, @intCast(1000 * samples_since_correlation)),
+        @as(i64, @intCast(audio_buffer.sample_rate)),
     );
 
     const playhead_timestamp_ms =
-        @intCast(i64, process_loop.correlated_timestamp_ms) +
+        @as(i64, @intCast(process_loop.correlated_timestamp_ms)) +
         ms_since_correlation;
 
     // Notify the parent process that a new recording is available
@@ -382,8 +401,7 @@ fn onRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
 }
 
 fn alignedPtrCast(opaque_ptr: *anyopaque, comptime T: type) *T {
-    const aligned = @alignCast(@alignOf(T), opaque_ptr);
-    return @ptrCast(*T, aligned);
+    return @ptrCast(@alignCast(opaque_ptr));
 }
 
 test {

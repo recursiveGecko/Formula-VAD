@@ -36,7 +36,7 @@ pub fn linkPackage(
             .{
                 .name = "onnxruntime",
                 .module = onnx.createModule(b),
-            }
+            },
         },
     });
 
