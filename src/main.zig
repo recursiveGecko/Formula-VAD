@@ -353,7 +353,7 @@ fn onRecording(
     };
 
     log.info("{s}: Saving recording to {s}", .{ process_loop.config.name, path });
-    audio_buffer.saveToFile(path, AudioBuffer.Format.vorbis, 1) catch |err| {
+    audio_buffer.saveToFile(path, AudioBuffer.Format.wav, 1) catch |err| {
         const msg = fmt.allocPrint(
             arena_alloc,
             "Error saving audio file: {any}. Path: {s}, AudioBuffer: {any}",
