@@ -337,7 +337,7 @@ fn onRecording(
 
     const filename = fmt.allocPrint(
         arena_alloc,
-        "{d}-{s}.ogg",
+        "{d}-{s}.wav",
         .{ audio_buffer.global_start_frame_number.?, @tagName(rec_type) },
     ) catch unreachable;
 
