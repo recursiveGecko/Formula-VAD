@@ -57,10 +57,10 @@ pub fn main() !void {
         exit(1);
     }
 
-    const input_segments = try readParseAudacitySegments(allocator, input_file_path.?);
+    const input_segments = try readParseAudacitySegments(allocator, input_file_path.?, SpeechSegment.Side.vad);
     defer allocator.free(input_segments);
 
-    const ref_segments = try readParseAudacitySegments(allocator, ref_file_path.?);
+    const ref_segments = try readParseAudacitySegments(allocator, ref_file_path.?, SpeechSegment.Side.ref);
     defer allocator.free(ref_segments);
 
     var evaluator = try Self.initAndRun(allocator, input_segments, ref_segments);
@@ -92,6 +92,8 @@ pub fn initAndRun(
     input: []const SpeechSegment,
     reference: []const SpeechSegment,
 ) !Self {
+    std.debug.print("speech_segments[0] = {s}, ref_seg[0] = {s}\n", .{ @tagName(input[0].side), @tagName(reference[0].side) });
+
     const input_copy = try allocator.alloc(SpeechSegment, input.len);
     errdefer allocator.free(input_copy);
 
@@ -172,11 +174,15 @@ pub fn deinit(self: *Self) void {
     self.allocator.free(self.reference_segments);
 }
 
-pub fn readParseAudacitySegments(allocator: Allocator, path: []const u8) ![]SpeechSegment {
+pub fn readParseAudacitySegments(
+    allocator: Allocator,
+    path: []const u8,
+    side: SpeechSegment.Side,
+) ![]SpeechSegment {
     const ref_contents = try fs.Dir.readFileAlloc(fs.cwd(), allocator, path, 10 * megabyte);
     defer allocator.free(ref_contents);
 
-    const ref_segments = try formats.parseAudacitySegments(allocator, ref_contents);
+    const ref_segments = try formats.parseAudacitySegments(allocator, ref_contents, side);
     errdefer allocator.free(ref_segments);
 
     return ref_segments;

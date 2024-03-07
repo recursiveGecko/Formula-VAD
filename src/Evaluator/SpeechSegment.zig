@@ -3,11 +3,12 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
 const Self = @This();
+pub const Side = enum { vad, ref };
 
 id: i64 = -1,
 from_sec: f32,
 to_sec: f32,
-side: enum { vad, ref },
+side: Side,
 
 opposite_segments: ?[]*Self = null,
 next: ?*Self = null,

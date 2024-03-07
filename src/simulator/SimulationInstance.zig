@@ -115,7 +115,7 @@ pub fn init(
         audio_source.* = AudioSource{ .stream = audio_stream };
     }
 
-    const ref_segments = try Evaluator.readParseAudacitySegments(allocator, ref_path);
+    const ref_segments = try Evaluator.readParseAudacitySegments(allocator, ref_path, Evaluator.SpeechSegment.Side.ref);
     errdefer allocator.free(ref_segments);
 
     return Self{

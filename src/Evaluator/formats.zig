@@ -4,14 +4,18 @@ const ArrayList = std.ArrayList;
 const SpeechSegment = @import("./SpeechSegment.zig");
 const Evaluator = @import("../Evaluator.zig");
 
-pub fn parseAudacitySegments(allocator: Allocator, txt: []const u8) ![]SpeechSegment {
+pub fn parseAudacitySegments(
+    allocator: Allocator,
+    txt: []const u8,
+    side: SpeechSegment.Side,
+) ![]SpeechSegment {
     var segments = ArrayList(SpeechSegment).init(allocator);
     errdefer segments.deinit();
 
     const no_cr = try std.mem.replaceOwned(u8, allocator, txt, "\r", "");
     defer allocator.free(no_cr);
 
-    var lines = std.mem.split(u8, txt, "\n");
+    var lines = std.mem.split(u8, no_cr, "\n");
 
     while (lines.next()) |line| {
         var fields = std.mem.split(u8, line, "\t");
@@ -26,7 +30,7 @@ pub fn parseAudacitySegments(allocator: Allocator, txt: []const u8) ![]SpeechSeg
         const segment = SpeechSegment{
             .from_sec = from,
             .to_sec = to,
-            .side = .ref,
+            .side = side,
         };
 
         try segments.append(segment);
