@@ -30,7 +30,7 @@ pub fn write(
     self: *Self,
     input: *const BufferedStep.Result,
 ) BufferedStep.Result {
-    var volume_analysis = analyseVolume(input.segment);
+    const volume_analysis = analyseVolume(input.segment);
 
     self.vad_metadata.push(
         volume_analysis,
@@ -52,8 +52,8 @@ pub fn analyseVolume(input_segment: *const Segment) VolumeAnalysis {
     var vol_min: f32 = 1;
     var vol_max: f32 = 0;
     for (0..n_channels) |channel_idx| {
-        var channel_slice = input_segment.channel_pcm_buf[channel_idx];
-        var vol = audio_utils.rmsVolume(channel_slice);
+        const channel_slice = input_segment.channel_pcm_buf[channel_idx];
+        const vol = audio_utils.rmsVolume(channel_slice);
 
         if (vol < vol_min) vol_min = vol;
         if (vol > vol_max) vol_max = vol;

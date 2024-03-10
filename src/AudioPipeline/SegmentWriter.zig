@@ -23,7 +23,7 @@ pub fn init(
 
     segment.index = 0;
 
-    var self = Self{
+    const self = Self{
         .allocator = allocator,
         .segment = segment,
     };
@@ -44,7 +44,7 @@ pub fn isFull(self: *Self) bool {
 /// the buffer is full and the buffer segment should be used in some way before
 /// calling .reset(), followed by a second .write() with the offset returned from this call.
 pub fn write(self: *Self, other: *const Segment, read_offset: usize, max_write: ?usize) !usize {
-    var segment = self.segment;
+    const segment = self.segment;
 
     // Determine the capacity of the internal buffer
     const capacity = segment.length;
@@ -84,8 +84,8 @@ pub fn write(self: *Self, other: *const Segment, read_offset: usize, max_write: 
             const dst_from = self.write_index;
             const src_from = read_offset;
 
-            var dst_buf = dst_chan.first[dst_from .. dst_from + n_from_first];
-            var src_buf = src_chan.first[src_from .. src_from + n_from_first];
+            const dst_buf = dst_chan.first[dst_from .. dst_from + n_from_first];
+            const src_buf = src_chan.first[src_from .. src_from + n_from_first];
 
             @memcpy(dst_buf, src_buf);
         }
@@ -97,8 +97,8 @@ pub fn write(self: *Self, other: *const Segment, read_offset: usize, max_write: 
             const dst_from = self.write_index + n_from_first;
             const src_from = read_offset - @min(src_chan.first.len, read_offset);
 
-            var dst_buf = dst_chan.first[dst_from .. dst_from + rem];
-            var src_buf = src_chan.second[src_from .. src_from + rem];
+            const dst_buf = dst_chan.first[dst_from .. dst_from + rem];
+            const src_buf = src_chan.second[src_from .. src_from + rem];
 
             @memcpy(dst_buf, src_buf);
         }
@@ -132,7 +132,7 @@ test "SegmentWriter" {
     defer segment_writer.deinit();
 
     const sample_pattern: []const f32 = &.{ 1, 2, 3, 4 };
-    var segment_channels: []const SplitSlice(f32) = &.{
+    const segment_channels: []const SplitSlice(f32) = &.{
         SplitSlice(f32){
             .first = @constCast(sample_pattern[0..1]),
             .second = @constCast(sample_pattern[1..]),

@@ -9,7 +9,7 @@ write_idx: usize = 0,
 written_count: usize = 0,
 
 pub fn init(allocator: Allocator, count: usize, initial_val: ?f64) !Self {
-    var data = try allocator.alloc(f64, count);
+    const data = try allocator.alloc(f64, count);
 
     var self = Self{
         .allocator = allocator,
@@ -44,7 +44,7 @@ pub fn push(self: *Self, sample: f32) f64 {
 
 pub fn avg(self: *Self) f64 {
     var avg_: f64 = 0.0;
-    var scalar: f64 = 1.0 / @as(f64, @floatFromInt(self.written_count));
+    const scalar: f64 = 1.0 / @as(f64, @floatFromInt(self.written_count));
 
     for (0..self.written_count) |i| {
         avg_ += self.data[i] * scalar;

@@ -17,7 +17,7 @@ pub fn SplitSlice(comptime T: type) type {
         owned_slices: enum { none, first, second, both } = .none,
 
         pub fn initWithCapacity(allocator: Allocator, length: usize) !Self {
-            var data = try allocator.alloc(T, length);
+            const data = try allocator.alloc(T, length);
             errdefer allocator.free(data);
 
             const self = Self{
@@ -65,7 +65,7 @@ pub fn SplitSlice(comptime T: type) type {
         /// SplitSlice shape is not copied exactly, instead `.first` slice has the
         /// capacity of `.first.len` + `.second.len`
         pub fn copyCapacity(self: Self, allocator: Allocator) !Self {
-            var data = try allocator.alloc(T, self.first.len + self.second.len);
+            const data = try allocator.alloc(T, self.first.len + self.second.len);
             errdefer allocator.free(data);
 
             const new_self = Self{
@@ -95,8 +95,8 @@ pub fn SplitSlice(comptime T: type) type {
             errdefer self.allocator.?.free(new_first);
 
             const n_to_copy = @min(current_size, new_size);
-            var src = self.first[0..n_to_copy];
-            var dst = new_first[0..n_to_copy];
+            const src = self.first[0..n_to_copy];
+            const dst = new_first[0..n_to_copy];
             @memcpy(dst, src);
 
             for (n_to_copy..new_size) |i| {

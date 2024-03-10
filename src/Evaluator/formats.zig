@@ -20,12 +20,12 @@ pub fn parseAudacitySegments(
     while (lines.next()) |line| {
         var fields = std.mem.split(u8, line, "\t");
 
-        var from_str = fields.next() orelse continue;
-        var to_str = fields.next() orelse continue;
+        const from_str = fields.next() orelse continue;
+        const to_str = fields.next() orelse continue;
         // var comment = fields.next() orelse continue;
 
-        var from: f32 = try std.fmt.parseFloat(f32, from_str);
-        var to: f32 = try std.fmt.parseFloat(f32, to_str);
+        const from: f32 = try std.fmt.parseFloat(f32, from_str);
+        const to: f32 = try std.fmt.parseFloat(f32, to_str);
 
         const segment = SpeechSegment{
             .from_sec = from,

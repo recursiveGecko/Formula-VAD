@@ -41,7 +41,7 @@ pub fn initWithCapacity(allocator: Allocator, n_channels: usize, length: usize) 
         chan_initialized += 1;
     }
 
-    var self = Self{
+    const self = Self{
         .index = undefined,
         .length = length,
         .allocator = allocator,
@@ -79,7 +79,7 @@ pub fn copy(self: *Self, allocator: Allocator) !Self {
         copied += 1;
     }
 
-    var new_self = Self{
+    const new_self = Self{
         .index = self.index,
         .length = self.length,
         .allocator = allocator,
@@ -107,7 +107,7 @@ pub fn copyCapacity(self: *Self, allocator: Allocator) !Self {
         copied += 1;
     }
 
-    var new_self = Self{
+    const new_self = Self{
         .index = self.index,
         .length = self.length,
         .allocator = allocator,

@@ -36,6 +36,7 @@ pub fn main() !void {
 
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, clap.parsers.default, .{
+        .allocator = allocator,
         .diagnostic = &diag,
     }) catch |err| {
         try printHelp();
@@ -92,8 +93,6 @@ pub fn initAndRun(
     input: []const SpeechSegment,
     reference: []const SpeechSegment,
 ) !Self {
-    std.debug.print("speech_segments[0] = {s}, ref_seg[0] = {s}\n", .{ @tagName(input[0].side), @tagName(reference[0].side) });
-
     const input_copy = try allocator.alloc(SpeechSegment, input.len);
     errdefer allocator.free(input_copy);
 
@@ -103,7 +102,7 @@ pub fn initAndRun(
     @memcpy(input_copy, input);
     @memcpy(reference_copy, reference);
 
-    var self = Self{
+    const self = Self{
         .allocator = allocator,
         .input_segments = input_copy,
         .reference_segments = reference_copy,

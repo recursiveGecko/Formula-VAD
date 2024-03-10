@@ -152,7 +152,7 @@ fn collectInputStep(self: *Self) !void {
         const to = from + frame_size;
         self.pipeline_read_count = to;
 
-        var input_segment: *Segment = &self.temp_input_segment;
+        const input_segment: *Segment = &self.temp_input_segment;
         try self.pipeline.sliceSegment(input_segment, from, to);
 
         const input_step_result = BufferedStep.Result{
@@ -171,7 +171,7 @@ fn denoiserStep(
 ) !void {
     var input_offset: usize = 0;
     while (true) {
-        var denoised_result = try self.buffered_denoiser.write(input, input_offset);
+        const denoised_result = try self.buffered_denoiser.write(input, input_offset);
 
         if (denoised_result.denoised_segment == null) return;
 

@@ -245,7 +245,7 @@ pub fn extrudeSegments(
 
     for (0..cloned.len - 1) |i| {
         var current = &cloned[i];
-        var next = &cloned[i + 1];
+        const next = &cloned[i + 1];
 
         if (next.from_sec - current.to_sec <= config.fill_gaps) {
             current.to_sec = next.from_sec;
@@ -298,12 +298,12 @@ test "calcFalsePositiveSec #1" {
             .to_sec = 5,
         },
     };
-    var ref_segments_ptrs: []const *SpeechSegment = &.{
+    const ref_segments_ptrs: []const *SpeechSegment = &.{
         @constCast(&ref_segments[0]),
         @constCast(&ref_segments[1]),
     };
 
-    var vad_segment = SpeechSegment{
+    const vad_segment = SpeechSegment{
         .side = .vad,
         .id = 1,
         .from_sec = 1,
@@ -311,7 +311,7 @@ test "calcFalsePositiveSec #1" {
         .opposite_segments = @constCast(ref_segments_ptrs),
     };
 
-    var config = StatConfig{
+    const config = StatConfig{
         .extrude_start = 2,
         .extrude_end = 2,
         .fill_gaps = 2,
@@ -336,12 +336,12 @@ test "calcFalsePositiveSec #2" {
             .to_sec = 5,
         },
     };
-    var ref_segments_ptrs: []const *SpeechSegment = &.{
+    const ref_segments_ptrs: []const *SpeechSegment = &.{
         @constCast(&ref_segments[0]),
         @constCast(&ref_segments[1]),
     };
 
-    var vad_segment = SpeechSegment{
+    const vad_segment = SpeechSegment{
         .side = .vad,
         .id = 1,
         .from_sec = 1,
@@ -349,7 +349,7 @@ test "calcFalsePositiveSec #2" {
         .opposite_segments = @constCast(ref_segments_ptrs),
     };
 
-    var config = StatConfig{
+    const config = StatConfig{
         .extrude_start = 2,
         .extrude_end = 2,
         .fill_gaps = 2,

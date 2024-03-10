@@ -104,7 +104,7 @@ pub fn init(
     const ref_path = try fs.path.resolve(allocator, &.{ base_path, instance_json.ref_path });
     defer allocator.free(ref_path);
 
-    var audio_source = try allocator.create(AudioSource);
+    const audio_source = try allocator.create(AudioSource);
     errdefer allocator.destroy(audio_source);
 
     if (sim_config.preload_audio) {
@@ -155,7 +155,7 @@ pub fn run(self: *Self) !void {
         "{s}: Streaming {d:.2}s from audio file. Running...",
         .{ self.name, self.audio_source.durationSeconds() },
     );
-    var vad_segments = try self.simulateVAD(thread_allocator, self.audio_source);
+    const vad_segments = try self.simulateVAD(thread_allocator, self.audio_source);
     defer thread_allocator.free(vad_segments);
 
     try self.storeResult(vad_segments);
@@ -212,7 +212,7 @@ fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VADPip
             _ = try pipeline.pushSamples(trimmed_channel_pcm);
         }
     } else if (audio.* == .buffer) {
-        var audio_buffer = audio.buffer;
+        const audio_buffer = audio.buffer;
         _ = try pipeline.pushSamples(audio_buffer.channel_pcm_buf);
     } else {
         unreachable;

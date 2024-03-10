@@ -73,11 +73,11 @@ pub fn saveToFile(
         .format = @as(i32, @intCast(@intFromEnum(format))),
     });
 
-    var sf_file = sndfile.sf_open(path_Z.ptr, sndfile.SFM_WRITE, &sf_info);
+    const sf_file = sndfile.sf_open(path_Z.ptr, sndfile.SFM_WRITE, &sf_info);
     defer _ = sndfile.sf_close(sf_file);
 
     if (format == .vorbis) {
-        var cmd_resut = sndfile.sf_command(
+        const cmd_resut = sndfile.sf_command(
             sf_file,
             sndfile.SFC_SET_VBR_ENCODING_QUALITY,
             @constCast(&quality),

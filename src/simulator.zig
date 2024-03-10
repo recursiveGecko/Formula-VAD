@@ -19,9 +19,9 @@ const megabyte = 1024 * 1024;
 const seconds_per_hour = 3600;
 
 /// stdlib option overrides
-pub const std_options = struct {
-    pub const log_level = .warn;
-    pub const log_scope_levels = &.{
+pub const std_options: std.Options = .{
+    .log_level = .warn,
+    .log_scope_levels = &.{
         .{
             .scope = .vad_sm,
             .level = .warn,
@@ -30,7 +30,7 @@ pub const std_options = struct {
             .scope = .vad,
             .level = .warn,
         },
-    };
+    },
 };
 
 const StaticSimConfig = struct {
@@ -92,6 +92,7 @@ pub fn main() !void {
 
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &cli_params, clap.parsers.default, .{
+        .allocator = allocator,
         .diagnostic = &diag,
     }) catch |err| {
         try printHelp();
@@ -137,7 +138,7 @@ pub fn main() !void {
     try stdout_w.writeAll(report);
 
     // Save report
-    var report_path = try std.fs.path.join(allocator, &.{ simulation.resolved_out_path.?, "report.txt" });
+    const report_path = try std.fs.path.join(allocator, &.{ simulation.resolved_out_path.?, "report.txt" });
     defer allocator.free(report_path);
     try std.fs.Dir.writeFile(fs.cwd(), report_path, report);
 }
@@ -154,7 +155,7 @@ pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
     });
 
     // If output dir was specified, create a timestamped output directory for this simulation
-    var resolved_out_path: ?[]const u8 = val: {
+    const resolved_out_path: ?[]const u8 = val: {
         if (plan_json.value.config.output_dir) |out_dir| {
             const subdir_name = try std.fmt.allocPrint(allocator, "{d}", .{std.time.timestamp()});
             const subdir_path = try fs.path.resolve(allocator, &.{ base_path, out_dir, subdir_name });
@@ -185,7 +186,7 @@ pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
 
     // Initialize instances, maybe creating output directories for each
     for (plan_json.value.instances, 0..) |instance_json, i| {
-        var out_dir = val: {
+        const out_dir = val: {
             if (resolved_out_path == null) break :val null;
 
             const instance_out_dir = try fs.path.resolve(allocator, &.{ resolved_out_path.?, instance_json.name });
@@ -203,7 +204,7 @@ pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
         instances_alloc += 1;
     }
 
-    var simulation = try allocator.create(Simulation);
+    const simulation = try allocator.create(Simulation);
     errdefer allocator.destroy(simulation);
 
     simulation.* = Simulation{

@@ -111,7 +111,7 @@ pub fn init(allocator: Allocator, config: Config, vad: VADPipeline) !Self {
     var vad_segments = try std.ArrayList(VADPipeline.SpeechSegment).initCapacity(allocator, 100);
     errdefer vad_segments.deinit();
 
-    var self = Self{
+    const self = Self{
         .allocator = allocator,
         .config = config,
         .buffered_fft = vad.buffered_fft,

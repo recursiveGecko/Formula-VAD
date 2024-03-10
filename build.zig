@@ -1,58 +1,38 @@
 const std = @import("std");
-const onnx = @import("lib/onnxruntime.zig/build.zig");
-
-const KV = struct {
-    @"0": []const u8,
-    @"1": []const u8,
-
-    pub fn k(self: @This()) []const u8 {
-        return self.@"0";
-    }
-
-    pub fn v(self: @This()) []const u8 {
-        return self.@"1";
-    }
-};
 
 const CommonOptions = struct {
-    target: std.zig.CrossTarget,
+    target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    clap_dep: *std.Build.Dependency,
+    onnx_dep: *std.Build.Dependency,
+    kissfft_dep: *std.Build.Dependency,
 };
-
-pub fn linkPackage(
-    b: *std.Build,
-    exe: *std.Build.CompileStep,
-    target: std.zig.CrossTarget,
-    optimize: std.builtin.Mode,
-) !void {
-    const common_options = CommonOptions{
-        .target = target,
-        .optimize = optimize,
-    };
-
-    const pkg = b.createModule(.{
-        .source_file = .{ .path = thisFileDir() ++ "/src/package.zig" },
-        .dependencies = &.{
-            .{
-                .name = "onnxruntime",
-                .module = onnx.createModule(b),
-            },
-        },
-    });
-
-    exe.addModule("formula_vad", pkg);
-    try addKissFFT(b, exe, common_options);
-    try addSndfile(b, exe, common_options);
-    try addOnnx(b, exe, common_options);
-}
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const clap_dep = b.dependency("clap", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const onnx_dep = b.dependency("onnxruntime", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const kissfft_dep = b.dependency("kissfft", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const common_options = CommonOptions{
         .target = target,
         .optimize = optimize,
+        .clap_dep = clap_dep,
+        .onnx_dep = onnx_dep,
+        .kissfft_dep = kissfft_dep,
     };
 
     //
@@ -148,19 +128,19 @@ pub fn build(b: *std.Build) !void {
 
 var kiss_fft_lib: ?*std.Build.Step.Compile = null;
 fn addKissFFT(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
-    const macros: []const KV = &.{
+    const Pair = [2][]const u8;
+    const macros: []const Pair = &.{
         .{ "kiss_fft_scalar", "float" },
     };
 
     if (kiss_fft_lib == null) {
-        const dir = thisFileDir() ++ "/lib/kissfft";
-        const source_files = try prefixedPaths(b.allocator, dir, &.{
+        const source_files = &.{
             // "kfc.c",
             "kiss_fft.c",
             // "kiss_fftnd.c",
             // "kiss_fftndr.c",
             "kiss_fftr.c",
-        });
+        };
 
         const lib = b.addStaticLibrary(.{
             .name = "kissfft",
@@ -169,16 +149,20 @@ fn addKissFFT(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOption
         });
 
         lib.linkLibC();
-        lib.addCSourceFiles(source_files, &.{"-Wall"});
+        lib.addCSourceFiles(.{
+            .root = options.kissfft_dep.path("."),
+            .files = source_files,
+            .flags = &.{"-Wall"},
+        });
 
         for (macros) |macro| {
-            lib.defineCMacro(macro.k(), macro.v());
+            lib.defineCMacro(macro[0], macro[1]);
         }
 
         kiss_fft_lib = lib;
     }
 
-    exe.addIncludePath(thisFileDir() ++ "/lib/kissfft");
+    exe.addIncludePath(options.kissfft_dep.path("."));
     exe.linkLibrary(kiss_fft_lib.?);
 }
 
@@ -188,23 +172,14 @@ fn addSndfile(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOption
     exe.linkSystemLibrary("sndfile");
 }
 
-var clap_module: ?*std.Build.Module = null;
 fn addClap(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
-    _ = options;
-    if (clap_module == null) {
-        clap_module = b.createModule(.{
-            .source_file = .{ .path = "lib/zig-clap/clap.zig" },
-        });
-    }
-
-    exe.addModule("clap", clap_module.?);
+    _ = b;
+    exe.root_module.addImport("clap", options.clap_dep.module("clap"));
 }
 
 fn addOnnx(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
-    try onnx.linkPackage(b, exe, .{
-        .target = options.target,
-        .optimize = options.optimize,
-    });
+    _ = b;
+    exe.root_module.addImport("onnxruntime", options.onnx_dep.module("onnxruntime"));
 }
 
 fn prefixedPaths(allocator: std.mem.Allocator, prefix: []const u8, paths: []const []const u8) ![][]const u8 {

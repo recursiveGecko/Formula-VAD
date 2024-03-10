@@ -26,7 +26,7 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
                 channel_buffers[i] = raw_buffer[from..to];
             }
 
-            var self = Self{
+            const self = Self{
                 .allocator = allocator,
                 .n_channels = n_channels,
                 .capacity = capacity,
@@ -219,7 +219,7 @@ test "write() ring buffer handling" {
     var mr_buffer = try MultiRingBuffer(i32, u64).init(test_allocator, 1, 5);
     defer mr_buffer.deinit();
 
-    var pcm = mr_buffer.channel_buffers[0];
+    const pcm = mr_buffer.channel_buffers[0];
     @memset(pcm, 0);
 
     _ = mr_buffer.write(&.{&.{ 0, 1, 2, 9, 9, 9 }}, 0, 2);

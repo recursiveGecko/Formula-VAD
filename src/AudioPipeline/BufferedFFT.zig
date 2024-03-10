@@ -85,20 +85,20 @@ pub fn init(allocator: Allocator, config: Config) !Self {
     // Pipeline sample number that corresponds to the start of the FFT buffer
     buffer.segment.index = 0;
 
-    var temp_result = try Result.init(
+    const temp_result = try Result.init(
         allocator,
         config.n_channels,
         config.fft_size,
         fft_instance.binCount(),
     );
 
-    var window = try allocator.alloc(f32, config.fft_size);
+    const window = try allocator.alloc(f32, config.fft_size);
     errdefer allocator.free(window);
     window_fn.hannWindowPeriodic(window);
 
     const norm_factor = window_fn.windowNormFactor(window) / @as(f32, @floatFromInt(config.fft_size));
 
-    var complex_buffer = try allocator.alloc(FFT.Complex, fft_instance.binCount());
+    const complex_buffer = try allocator.alloc(FFT.Complex, fft_instance.binCount());
     errdefer allocator.free(complex_buffer);
 
     const hop_size = if (config.hop_size > 0) config.hop_size else config.fft_size;

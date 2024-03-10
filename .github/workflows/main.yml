@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  ZIG_VERSION: 0.11.0-dev.3937+78eb3c561
+  ZIG_VERSION: 0.12.0-dev.3192+e2cbbd0c2
 
 jobs:
   test:

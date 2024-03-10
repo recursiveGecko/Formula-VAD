@@ -100,7 +100,7 @@ pub fn finalize(self: *Self, to_frame: u64, keep: bool) !?AudioBuffer {
         const segment = self.segment_writer.segment;
         try self.allocNewWriter();
 
-        var audio_buffer = try segmentToAudioBuffer(segment, self.sample_rate);
+        const audio_buffer = try segmentToAudioBuffer(segment, self.sample_rate);
 
         self.last_recording_end_index = to_frame;
         return audio_buffer;
@@ -150,7 +150,7 @@ fn segmentToAudioBuffer(segment: Segment, sample_rate: usize) !AudioBuffer {
         segment.channel_pcm_buf[i].deinit();
     }
 
-    var audio_buffer = AudioBuffer{
+    const audio_buffer = AudioBuffer{
         .allocator = allocator,
         .length = segment.length,
         .sample_rate = sample_rate,

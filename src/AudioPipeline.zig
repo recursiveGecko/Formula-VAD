@@ -59,7 +59,7 @@ pub fn init(
     );
     errdefer denoised_audio_buffer.deinit();
 
-    var temp_channel_slice = try allocator.alloc([]const f32, config.n_channels);
+    const temp_channel_slice = try allocator.alloc([]const f32, config.n_channels);
     errdefer allocator.free(temp_channel_slice);
 
     var self = try allocator.create(Self);

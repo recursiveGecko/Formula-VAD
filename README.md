@@ -7,7 +7,7 @@ Project dedicated to audio analysis of F1 onboard streams for the purposes of ra
 
 # Current VAD results
 
-As of `2023-06-10`.
+As of `2024-03-10`.
 
 ```
 => Definitions
@@ -25,53 +25,44 @@ FDR (False discovery rate):                 Probability that detected speech seg
 
 |                           Name |    P |   TP |   FP |   FN |    TPR |    PPV |  FNR (!) |  FDR (!) |
 | ------------------------------ | ---- | ---- | ---- | ---- | ------ | ------ | -------- | -------- |
-|        2023 Monaco FP1 - Perez | 1137 | 1135 |    5 |    2 |  99.8% |  99.6% |     0.2% |     0.4% |
-|     2023 Miami Race - Sargeant | 1092 | 1075 |    6 |   17 |  98.4% |  99.4% |     1.6% |     0.6% |
-|        2023 Miami Race - Gasly | 1447 | 1362 |   23 |   86 |  94.1% |  98.3% |     5.9% |     1.7% |
-|        2023 Miami Race - Perez | 1025 |  996 |    5 |   29 |  97.2% |  99.5% |     2.8% |     0.5% |
-|      2023 Miami Race - Leclerc | 1222 | 1222 |    0 |    0 | 100.0% | 100.0% |     0.0% |     0.0% |
-|     2023 Miami Race - De Vries |  952 |  940 |    0 |   12 |  98.7% | 100.0% |     1.3% |     0.0% |
-|         2023 Miami Race - Zhou | 1082 | 1070 |   11 |   12 |  98.9% |  99.0% |     1.1% |     1.0% |
-|    2023 Miami Race - Magnussen | 1028 | 1020 |    6 |    7 |  99.3% |  99.5% |     0.7% |     0.5% |
-|      2023 Miami Race - Russell | 1435 | 1398 |    8 |   37 |  97.4% |  99.4% |     2.6% |     0.6% |
-|       2023 Miami Race - Norris |  513 |  512 |    0 |    1 |  99.8% | 100.0% |     0.2% |     0.0% |
-|       2023 Miami Race - Stroll | 1114 | 1108 |    0 |    6 |  99.5% | 100.0% |     0.5% |     0.0% |
-|      2023 Miami Race - Tsunoda |  671 |  664 |    0 |    6 |  99.1% | 100.0% |     0.9% |     0.0% |
-|   2023 Miami Race - Verstappen | 1049 | 1039 |    0 |   10 |  99.0% | 100.0% |     1.0% |     0.0% |
-|        2023 Miami Race - Sainz | 1447 | 1436 |    8 |   11 |  99.3% |  99.4% |     0.7% |     0.6% |
-|        2023 Miami Race - Albon |  561 |  547 |    0 |   14 |  97.5% | 100.0% |     2.5% |     0.0% |
-|   2023 Miami Race - Hulkenberg |  617 |  617 |   18 |    0 | 100.0% |  97.2% |     0.0% |     2.8% |
-|         2023 Miami Race - Ocon |  597 |  594 |   14 |    3 |  99.5% |  97.7% |     0.5% |     2.3% |
-|     2023 Miami Race - Hamilton | 1261 | 1233 |   10 |   28 |  97.8% |  99.2% |     2.2% |     0.8% |
-|       2023 Miami Race - Alonso | 1172 | 1154 |    0 |   18 |  98.4% | 100.0% |     1.6% |     0.0% |
-|       2023 Miami Race - Bottas |  575 |  573 |    0 |    2 |  99.6% | 100.0% |     0.4% |     0.0% |
-|      2023 Miami Race - Piastri |  822 |  782 |    0 |   40 |  95.1% | 100.0% |     4.9% |     0.0% |
+|     2023 Miami Race - Sargeant | 1098 | 1081 |    0 |   18 |  98.4% | 100.0% |     1.6% |     0.0% |
+|        2023 Miami Race - Gasly | 1463 | 1379 |   22 |   83 |  94.3% |  98.4% |     5.7% |     1.6% |
+|        2023 Miami Race - Perez | 1038 | 1018 |    5 |   20 |  98.1% |  99.5% |     1.9% |     0.5% |
+|      2023 Miami Race - Leclerc | 1210 | 1210 |    0 |    0 | 100.0% | 100.0% |     0.0% |     0.0% |
+|     2023 Miami Race - De Vries |  959 |  950 |    0 |    9 |  99.1% | 100.0% |     0.9% |     0.0% |
+|         2023 Miami Race - Zhou | 1081 | 1074 |    5 |    7 |  99.4% |  99.5% |     0.6% |     0.5% |
+|    2023 Miami Race - Magnussen | 1027 | 1025 |    8 |    1 |  99.9% |  99.2% |     0.1% |     0.8% |
+|      2023 Miami Race - Russell | 1446 | 1431 |    8 |   15 |  99.0% |  99.4% |     1.0% |     0.6% |
+|       2023 Miami Race - Norris |  508 |  507 |    0 |    1 |  99.8% | 100.0% |     0.2% |     0.0% |
+|       2023 Miami Race - Stroll | 1113 | 1106 |    0 |    7 |  99.3% | 100.0% |     0.7% |     0.0% |
+|      2023 Miami Race - Tsunoda |  669 |  665 |    0 |    4 |  99.4% | 100.0% |     0.6% |     0.0% |
+|   2023 Miami Race - Verstappen | 1047 | 1041 |    0 |    5 |  99.5% | 100.0% |     0.5% |     0.0% |
+|        2023 Miami Race - Sainz | 1428 | 1401 |    8 |   27 |  98.1% |  99.4% |     1.9% |     0.6% |
+|        2023 Miami Race - Albon |  570 |  560 |   12 |   10 |  98.2% |  97.9% |     1.8% |     2.1% |
+|   2023 Miami Race - Hulkenberg |  613 |  613 |   17 |    0 | 100.0% |  97.3% |     0.0% |     2.7% |
+|         2023 Miami Race - Ocon |  591 |  589 |   12 |    2 |  99.7% |  98.0% |     0.3% |     2.0% |
+|     2023 Miami Race - Hamilton | 1256 | 1217 |    9 |   39 |  96.9% |  99.3% |     3.1% |     0.7% |
+|       2023 Miami Race - Alonso | 1184 | 1174 |    0 |   10 |  99.2% | 100.0% |     0.8% |     0.0% |
+|       2023 Miami Race - Bottas |  585 |  583 |    0 |    2 |  99.7% | 100.0% |     0.3% |     0.0% |
+|      2023 Miami Race - Piastri |  793 |  733 |    0 |   60 |  92.5% | 100.0% |     7.5% |     0.0% |
 
 => Aggregate stats 
 
-Total speech duration  (P): 20822.3 sec
-True positives        (TP): 20480.1 sec
-False positives       (FP):   113.3 sec
-False negatives       (FN):   342.2 sec    Min.    Avg.    Max. 
-True positive rate   (TPR):    98.4%  |   94.1% / 98.5% /100.0% 
-Precision            (PPV):    99.4%  |   97.2% / 99.4% /100.0% 
-False negative rate  (FNR):     1.6%  |    0.0% /  1.5% /  5.9% 
-False discovery rate (FDR):     0.6%  |    0.0% /  0.6% /  2.8% 
+Total speech duration  (P): 19677.4 sec
+True positives        (TP): 19357.8 sec
+False positives       (FP):   107.6 sec
+False negatives       (FN):   319.6 sec    Min.    Avg.    Max. 
+True positive rate   (TPR):    98.4%  |   92.5% / 98.5% /100.0% 
+Precision            (PPV):    99.4%  |   97.3% / 99.4% /100.0% 
+False negative rate  (FNR):     1.6%  |    0.0% /  1.5% /  7.5% 
+False discovery rate (FDR):     0.6%  |    0.0% /  0.6% /  2.7% 
 F-Score (β =  0.70)       :    99.1% 
 Fowlkes-Mallows index     :    98.9% 
 ```
 
-# Cloning
-
-This project uses Git submodules.
-
-```bash
-git clone --recursive https://github.com/recursiveGecko/formula-vad
-```
-
 # Dependencies
 
-* Zig: `0.11.0 master`. Requires ~`0.11.0-dev.3937+78eb3c561`.
+* Zig: `0.12.0 master`. Tested with `0.12.0-dev.3192+e2cbbd0c2`.
 
 * libsndfile:
 

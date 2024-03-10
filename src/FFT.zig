@@ -59,7 +59,7 @@ pub fn init(
         return error.KissFFTAllocFailed;
     }
 
-    var self = try allocator.create(Self);
+    const self = try allocator.create(Self);
     errdefer allocator.destroy(self);
 
     self.* = Self{

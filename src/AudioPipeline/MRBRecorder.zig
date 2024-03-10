@@ -50,7 +50,7 @@ pub fn init(
     );
     errdefer recorder.deinit();
 
-    var temp_record_slices = try allocator.alloc(
+    const temp_record_slices = try allocator.alloc(
         SplitSlice(f32),
         n_channels,
     );

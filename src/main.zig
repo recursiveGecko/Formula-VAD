@@ -10,14 +10,14 @@ const uuid = @import("./uuid.zig");
 const clap = @import("clap");
 
 /// stdlib option overrides
-pub const std_options = struct {
-    pub const log_level = .info;
-    pub const log_scope_levels = &.{
+pub const std_options: std.Options = .{
+    .log_level = .info,
+    .log_scope_levels = &.{
         .{
             .scope = .vad,
             .level = .info,
         },
-    };
+    },
 };
 
 const log = std.log.scoped(.main);
@@ -170,7 +170,7 @@ pub fn startProcessLoop(process_loop: *ProcessLoopState) !void {
 
     var arena = std.heap.ArenaAllocator.init(process_loop.allocator);
     defer arena.deinit();
-    var arena_alloc = arena.allocator();
+    const arena_alloc = arena.allocator();
     const megabyte = 1024 * 1024;
 
     while (true) {
@@ -286,7 +286,7 @@ fn processSkipSegment(
 ) !void {
     const n_pipeline_channels = process_loop.pipeline.config.n_channels;
 
-    var pcm = try arena_alloc.alloc(f32, process_loop.last_segment_length);
+    const pcm = try arena_alloc.alloc(f32, process_loop.last_segment_length);
     var channels = try arena_alloc.alloc([]const f32, n_pipeline_channels);
     @memset(pcm, 0);
     for (0..n_pipeline_channels) |i| {
