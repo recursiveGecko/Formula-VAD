@@ -53,7 +53,11 @@ pub fn serializeEvaluatorToAudacityTxt(allocator: Allocator, evaluator: Evaluato
 
     for (evaluator.reference_segments) |ref_segment| {
         if (ref_segment.hasMatch()) continue;
-        try writer.print("{d:.4}\t{d:.4}\t{s}\n", .{ ref_segment.from_sec, ref_segment.to_sec, "missed" });
+
+        const comment = try std.fmt.allocPrint(allocator, "missed {s}", .{ref_segment.debug_info orelse ""});
+        defer allocator.free(comment);
+
+        try writer.print("{d:.4}\t{d:.4}\t{s}\n", .{ ref_segment.from_sec, ref_segment.to_sec, comment });
     }
 
     return contents_array.toOwnedSlice();

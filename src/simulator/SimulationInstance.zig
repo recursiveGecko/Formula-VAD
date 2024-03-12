@@ -237,17 +237,17 @@ pub fn storeResult(
         const from_sec = @as(f32, @floatFromInt(vad_segment.sample_from)) / @as(f32, @floatFromInt(sample_rate));
         const to_sec = @as(f32, @floatFromInt(vad_segment.sample_to)) / @as(f32, @floatFromInt(sample_rate));
 
-        const debug_info = try std.fmt.allocPrint(
-            self.main_thread_allocator,
-            "vr:{d:.2} vad:{d:.1}s",
-            .{ vad_segment.avg_channel_vol_ratio, vad_segment.vad_met_sec },
-        );
+        // const debug_info = try std.fmt.allocPrint(
+        //     self.main_thread_allocator,
+        //     "vr:{d:.2} vad:{d:.1}s",
+        //     .{ vad_segment.avg_channel_vol_ratio, vad_segment.vad_met_sec },
+        // );
 
         speech_segments[i] = .{
             .side = .vad,
             .from_sec = from_sec,
             .to_sec = to_sec,
-            .debug_info = debug_info,
+            .debug_info = null,
         };
     }
 

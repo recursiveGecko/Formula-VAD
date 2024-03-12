@@ -85,18 +85,39 @@ pub const StatConfig = struct {
 pub fn fromEvaluator(eval: Evaluator, config: StatConfig) !SingleStats {
     var stats = SingleStats{};
 
-    for (eval.input_segments) |segment| {
-        stats.false_positives_sec += try calcFalsePositiveSec(eval.allocator, segment, config);
-        const true_positives_sec = try calcTruePositiveSec(eval.allocator, segment, config);
+    for (eval.input_segments) |*segment| {
+        const false_positives_sec = try calcFalsePositiveSec(eval.allocator, segment.*, config);
+        const true_positives_sec = try calcTruePositiveSec(eval.allocator, segment.*, config);
 
+        var fp_debug: []const u8 = "";
+        if (false_positives_sec > 0.01) {
+            // Memory leak, could be freed
+            fp_debug = try std.fmt.allocPrint(eval.allocator, "FP:{d:.1}s", .{false_positives_sec});
+        }
+
+        segment.debug_info = try std.fmt.allocPrint(eval.allocator, "{s}", .{fp_debug});
+
+        stats.false_positives_sec += false_positives_sec;
         stats.true_positives_sec += true_positives_sec;
         stats.total_positives_sec += true_positives_sec;
     }
 
-    for (eval.reference_segments) |ref_segment| {
-        if (ref_segment.duration() < config.ignore_shorter_than_sec) continue;
+    for (eval.reference_segments) |*ref_segment| {
+        const false_negative_sec = try calcFalseNegativeSec(eval.allocator, ref_segment.*, config);
 
-        const false_negative_sec = try calcFalseNegativeSec(eval.allocator, ref_segment, config);
+        var fn_debug: []const u8 = "";
+        if (false_negative_sec > 0.01) {
+            // Memory leak, could be freed
+            fn_debug = try std.fmt.allocPrint(eval.allocator, "FN:{d:.1}s", .{false_negative_sec});
+        }
+
+        ref_segment.debug_info = try std.fmt.allocPrint(eval.allocator, "{s}", .{fn_debug});
+
+        if (ref_segment.duration() < config.ignore_shorter_than_sec) {
+            ref_segment.debug_info = try std.fmt.allocPrint(eval.allocator, "short,{d:.1}s", .{ref_segment.duration()});
+            continue;
+        }
+
         stats.false_negatives_sec += false_negative_sec;
         stats.total_positives_sec += false_negative_sec;
     }

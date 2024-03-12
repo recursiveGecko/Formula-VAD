@@ -122,9 +122,6 @@ pub fn main() !void {
 
     try runAll(allocator, simulation);
 
-    // Generate output and report
-    _ = try maybeSaveOutput(allocator, simulation);
-
     const stat_config = Evaluator.statistics.StatConfig{
         .ignore_shorter_than_sec = simulation.config.vad_config.vad_machine_config.min_vad_duration_sec,
         .extrude_start = 5,
@@ -136,6 +133,9 @@ pub fn main() !void {
     defer allocator.free(report);
 
     try stdout_w.writeAll(report);
+
+    // Generate output and report
+    _ = try maybeSaveOutput(allocator, simulation);
 
     // Save report
     const report_path = try std.fs.path.join(allocator, &.{ simulation.resolved_out_path.?, "report.txt" });
