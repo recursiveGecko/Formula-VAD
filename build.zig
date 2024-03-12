@@ -61,11 +61,11 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    // try addZigGameDev(b, exe, common_options);
     try addClap(b, exe, common_options);
     try addSndfile(b, exe, common_options);
     try addKissFFT(b, exe, common_options);
     try addOnnx(b, exe, common_options);
+    try setRPath(exe);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -86,9 +86,9 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    // try addZigGameDev(b, unit_tests, common_options);
     try addKissFFT(b, unit_tests, common_options);
     try addOnnx(b, unit_tests, common_options);
+    try setRPath(exe);
 
     b.installArtifact(unit_tests);
 
@@ -106,6 +106,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     try addClap(b, evaluator_exe, common_options);
+    try setRPath(exe);
     b.installArtifact(evaluator_exe);
 
     const evaluator_run_cmd = b.addRunArtifact(evaluator_exe);
@@ -129,6 +130,7 @@ pub fn build(b: *std.Build) !void {
     try addSndfile(b, simulator_exe, common_options);
     try addKissFFT(b, simulator_exe, common_options);
     try addOnnx(b, simulator_exe, common_options);
+    try setRPath(exe);
     b.installArtifact(simulator_exe);
 
     const simulator_run_cmd = b.addRunArtifact(simulator_exe);
@@ -138,6 +140,11 @@ pub fn build(b: *std.Build) !void {
     }
     const simulator_run_step = b.step("simulator", "Run the simulator (audio file + reference output)");
     simulator_run_step.dependOn(&simulator_run_cmd.step);
+}
+
+fn setRPath(exe: *std.Build.Step.Compile) !void {
+    exe.root_module.addRPathSpecial("$ORIGIN/../lib");
+    exe.each_lib_rpath = false;
 }
 
 var kiss_fft_lib: ?*std.Build.Step.Compile = null;
