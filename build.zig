@@ -17,7 +17,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    const onnx_dep = b.dependency("onnxruntime", .{
+    const onnx_dep = b.dependency("zig_onnxruntime", .{
         .target = target,
         .optimize = optimize,
     });
@@ -34,6 +34,20 @@ pub fn build(b: *std.Build) !void {
         .onnx_dep = onnx_dep,
         .kissfft_dep = kissfft_dep,
     };
+
+    //
+    // onnxruntime shared library
+    //
+    // ugly hack to install onnxruntime.so libraries (without symlinks: https://github.com/ziglang/zig/pull/18619)
+    // this works in this case by SONAME of libonnxruntime.so is directly referencing minor version, which doesn't require symlinks
+    // inspired by https://medium.com/@edlyuu/zig-package-manager-2-wtf-is-build-zig-zon-and-build-zig-0-11-0-update-5bc46e830fc1
+    //
+    const install_onnx_libs = b.addInstallDirectory(.{
+        .source_dir = onnx_dep.module("onnxruntime_lib").root_source_file.?,
+        .install_dir = .lib,
+        .install_subdir = ".",
+    });
+    b.getInstallStep().dependOn(&install_onnx_libs.step);
 
     //
     // Main formula-vad exe
@@ -179,19 +193,5 @@ fn addClap(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) 
 
 fn addOnnx(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
     _ = b;
-    exe.root_module.addImport("onnxruntime", options.onnx_dep.module("onnxruntime"));
-}
-
-fn prefixedPaths(allocator: std.mem.Allocator, prefix: []const u8, paths: []const []const u8) ![][]const u8 {
-    const prefixed_paths = try allocator.alloc([]const u8, paths.len);
-
-    for (paths, 0..) |path, i| {
-        prefixed_paths[i] = try std.fs.path.joinZ(allocator, &.{ prefix, path });
-    }
-
-    return prefixed_paths;
-}
-
-inline fn thisFileDir() []const u8 {
-    return comptime std.fs.path.dirname(@src().file) orelse ".";
+    exe.root_module.addImport("onnxruntime", options.onnx_dep.module("zig-onnxruntime"));
 }

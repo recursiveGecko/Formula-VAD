@@ -14,9 +14,9 @@
             .url = "https://github.com/Hejsil/zig-clap/archive/0f2db7700b05356ebb1ccddbbf1797048925f072.tar.gz",
             .hash = "12203896de6eedec14712f4f1eaac8b646939cfed213c56accf231a0abb05f9dbb77",
         },
-        .onnxruntime = .{
-            .url = "https://github.com/recursiveGecko/onnxruntime.zig/archive/9587ee674d523c6557c700c40578116061bc482c.tar.gz",
-            .hash = "12207515b9488ad478a10d51a5db62c1de0762189a0ead4bd64c0c0601a37db50fef",
+        .zig_onnxruntime = .{
+            .url = "https://github.com/recursiveGecko/onnxruntime.zig/archive/70b3d64b63a4dc40077c09b0c80cf4751ad1a059.tar.gz",
+            .hash = "1220dae7b48da8abe90344adb3c03f33806d4a84c8db13bbb8fcd32c16dba19d9847",
         },
         .kissfft = .{
             .url = "https://github.com/mborgerding/kissfft/archive/refs/tags/131.1.0.tar.gz",
