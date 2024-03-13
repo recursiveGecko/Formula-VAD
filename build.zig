@@ -64,6 +64,7 @@ pub fn build(b: *Build) !void {
     try addSndfile(b, main_exe, common_options);
     try addKissFFT(b, main_exe, common_options);
     try addOnnx(b, main_exe, common_options);
+    try addDeepFilterNet(b, main_exe, common_options);
     try setRPath(main_exe);
 
     const main_exe_install = b.addInstallArtifact(main_exe, .{});
@@ -91,6 +92,7 @@ pub fn build(b: *Build) !void {
     });
     try addClap(b, test_exe, common_options);
     try addSndfile(b, test_exe, common_options);
+    try addDeepFilterNet(b, test_exe, common_options);
     try addKissFFT(b, test_exe, common_options);
     try addOnnx(b, test_exe, common_options);
 
@@ -134,6 +136,7 @@ pub fn build(b: *Build) !void {
     try addSndfile(b, sim_exe, common_options);
     try addKissFFT(b, sim_exe, common_options);
     try addOnnx(b, sim_exe, common_options);
+    try addDeepFilterNet(b, sim_exe, common_options);
     try setRPath(sim_exe);
 
     const sim_exe_install = b.addInstallArtifact(sim_exe, .{});
@@ -192,6 +195,20 @@ fn addKissFFT(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void
 
     exe.addIncludePath(options.kissfft_dep.path("."));
     exe.linkLibrary(kiss_fft_lib.?);
+}
+
+fn addDeepFilterNet(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void {
+    _ = b; // autofix
+    _ = options; // autofix
+    exe.addObjectFile(.{ .path = "tmp/libdf/lib/libdeepfilter.a" });
+    exe.linkSystemLibrary("unwind");
+
+    // exe.linkSystemLibrary("deepfilter");
+    // exe.addLibraryPath(.{ .path = "libdf/lib" });
+    // exe.addRPath(.{ .path = "libdf/lib" });
+
+    exe.addIncludePath(.{ .path = "tmp/libdf/include" });
+    // exe.linkLibC();
 }
 
 fn addSndfile(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void {

@@ -11,12 +11,15 @@ const VADMachine = @import("./VADMachine.zig");
 const VADMetadata = @import("./VADMetadata.zig");
 const BufferedStep = @import("./BufferedStep.zig");
 const BufferedVolumeAnalyzer = @import("./BufferedVolumeAnalyzer.zig");
-const BufferedDenoiser = @import("./BufferedDenoiser.zig");
+const BufferedNSNet2Denoiser = @import("./BufferedNSNet2Denoiser.zig");
+const BufferedDFNDenoiser = @import("./BufferedDFNDenoiser.zig");
 const BufferedMixer = @import("BufferedMixer.zig");
 const audio_utils = @import("../audio_utils.zig");
 const types = @import("../types.zig");
 
 const Self = @This();
+
+const DenoiserModule = BufferedDFNDenoiser;
 
 pub const Config = struct {
     fft_size: usize = 1024,
@@ -41,7 +44,7 @@ n_channels: usize,
 /// Number of samples VAD has read from the pipeline
 pipeline_read_count: u64 = 0,
 buffered_mixer: *BufferedMixer,
-buffered_denoiser: *BufferedDenoiser,
+buffered_denoiser: *DenoiserModule,
 buffered_fft: *BufferedFFT,
 // Speech state machine
 vad_machine: VADMachine,
@@ -76,7 +79,7 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !*Self {
     self.buffered_mixer = try BufferedMixer.init(allocator, "mixer", 48000, 2, true);
     errdefer self.buffered_mixer.deinit();
 
-    self.buffered_denoiser = try BufferedDenoiser.init(
+    self.buffered_denoiser = try DenoiserModule.init(
         allocator,
         "denoiser",
         config.denoiser_model_path,
