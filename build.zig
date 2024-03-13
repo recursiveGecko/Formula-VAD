@@ -39,7 +39,7 @@ pub fn build(b: *std.Build) !void {
     // onnxruntime shared library
     //
     // ugly hack to install onnxruntime.so libraries (without symlinks: https://github.com/ziglang/zig/pull/18619)
-    // this works in this case by SONAME of libonnxruntime.so is directly referencing minor version, which doesn't require symlinks
+    // this works in this case because SONAME of libonnxruntime.so is directly referencing minor version `libonnxruntime.so.x.y.z`, which doesn't require symlinks
     // inspired by https://medium.com/@edlyuu/zig-package-manager-2-wtf-is-build-zig-zon-and-build-zig-0-11-0-update-5bc46e830fc1
     //
     const install_onnx_libs = b.addInstallDirectory(.{
