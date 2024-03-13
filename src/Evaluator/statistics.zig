@@ -90,8 +90,9 @@ pub fn fromEvaluator(eval: Evaluator, config: StatConfig) !SingleStats {
         const true_positives_sec = try calcTruePositiveSec(eval.allocator, segment.*, config);
 
         var fp_debug: []const u8 = "";
+        defer if (fp_debug.len > 0) eval.allocator.free(fp_debug);
+
         if (false_positives_sec > 0.01) {
-            // Memory leak, could be freed
             fp_debug = try std.fmt.allocPrint(eval.allocator, "FP:{d:.1}s", .{false_positives_sec});
         }
 
@@ -106,8 +107,9 @@ pub fn fromEvaluator(eval: Evaluator, config: StatConfig) !SingleStats {
         const false_negative_sec = try calcFalseNegativeSec(eval.allocator, ref_segment.*, config);
 
         var fn_debug: []const u8 = "";
+        defer if (fn_debug.len > 0) eval.allocator.free(fn_debug);
+
         if (false_negative_sec > 0.01) {
-            // Memory leak, could be freed
             fn_debug = try std.fmt.allocPrint(eval.allocator, "FN:{d:.1}s", .{false_negative_sec});
         }
 
