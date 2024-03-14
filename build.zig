@@ -1,14 +1,15 @@
 const std = @import("std");
+const Build = std.Build;
 
 const CommonOptions = struct {
-    target: std.Build.ResolvedTarget,
+    target: Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-    clap_dep: *std.Build.Dependency,
-    onnx_dep: *std.Build.Dependency,
-    kissfft_dep: *std.Build.Dependency,
+    clap_dep: *Build.Dependency,
+    onnx_dep: *Build.Dependency,
+    kissfft_dep: *Build.Dependency,
 };
 
-pub fn build(b: *std.Build) !void {
+pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -26,7 +27,6 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-
     const common_options = CommonOptions{
         .target = target,
         .optimize = optimize,
@@ -47,13 +47,12 @@ pub fn build(b: *std.Build) !void {
         .install_dir = .lib,
         .install_subdir = ".",
     });
-    b.getInstallStep().dependOn(&install_onnx_libs.step);
 
     //
     // Main formula-vad exe
     //
 
-    const exe = b.addExecutable(.{
+    const main_exe = b.addExecutable(.{
         .name = "formula-vad",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
@@ -61,94 +60,107 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    try addClap(b, exe, common_options);
-    try addSndfile(b, exe, common_options);
-    try addKissFFT(b, exe, common_options);
-    try addOnnx(b, exe, common_options);
-    try setRPath(exe);
-    b.installArtifact(exe);
+    try addClap(b, main_exe, common_options);
+    try addSndfile(b, main_exe, common_options);
+    try addKissFFT(b, main_exe, common_options);
+    try addOnnx(b, main_exe, common_options);
+    try setRPath(main_exe);
 
-    const run_cmd = b.addRunArtifact(exe);
-    run_cmd.step.dependOn(b.getInstallStep());
+    const main_exe_install = b.addInstallArtifact(main_exe, .{});
+    main_exe_install.step.dependOn(&install_onnx_libs.step);
+    b.getInstallStep().dependOn(&main_exe_install.step);
+
+    const main_run_artifact = b.addRunArtifact(main_exe);
+    main_run_artifact.step.dependOn(&main_exe.step);
+
     if (b.args) |args| {
-        run_cmd.addArgs(args);
+        main_run_artifact.addArgs(args);
     }
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
+    const main_run_step = b.step("run", "Run the main program");
+    main_run_step.dependOn(&main_run_artifact.step);
 
     //
     // formula-vad tests
     //
 
-    const unit_tests = b.addTest(.{
+    const test_exe = b.addTest(.{
         .name = "formula-vad-test",
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
     });
-    try addKissFFT(b, unit_tests, common_options);
-    try addOnnx(b, unit_tests, common_options);
-    try setRPath(exe);
+    try addKissFFT(b, test_exe, common_options);
+    try addOnnx(b, test_exe, common_options);
+    try setRPath(test_exe);
 
-    b.installArtifact(unit_tests);
+    const test_exe_install = b.addInstallArtifact(test_exe, .{});
+    test_exe_install.step.dependOn(&install_onnx_libs.step);
+    b.getInstallStep().dependOn(&test_exe_install.step);
 
-    const run_unit_tests = b.addRunArtifact(unit_tests);
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_unit_tests.step);
+    const test_run_artifact = b.addRunArtifact(test_exe);
+    test_run_artifact.step.dependOn(&test_exe.step);
+
+    const test_run_step = b.step("test", "Run unit tests");
+    test_run_step.dependOn(&test_run_artifact.step);
 
     //
     // vad-evaluator executable (evaluates given input against a reference file)
     //
-    const evaluator_exe = b.addExecutable(.{
+    const eval_exe = b.addExecutable(.{
         .name = "vad-evaluator",
         .root_source_file = .{ .path = "src/Evaluator.zig" },
         .target = target,
         .optimize = optimize,
     });
-    try addClap(b, evaluator_exe, common_options);
-    try setRPath(exe);
-    b.installArtifact(evaluator_exe);
+    try addClap(b, eval_exe, common_options);
+    try setRPath(eval_exe);
 
-    const evaluator_run_cmd = b.addRunArtifact(evaluator_exe);
-    evaluator_run_cmd.step.dependOn(b.getInstallStep());
+    const eval_exe_install = b.addInstallArtifact(eval_exe, .{});
+    b.getInstallStep().dependOn(&eval_exe_install.step);
+
+    const eval_run_artifact = b.addRunArtifact(eval_exe);
+    eval_run_artifact.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
-        evaluator_run_cmd.addArgs(args);
+        eval_run_artifact.addArgs(args);
     }
-    const evaluator_run_step = b.step("evaluator", "Run the evaluator (VAD output + reference output)");
-    evaluator_run_step.dependOn(&evaluator_run_cmd.step);
+    const eval_run_step = b.step("evaluator", "Run the evaluator (VAD output + reference output)");
+    eval_run_step.dependOn(&eval_run_artifact.step);
 
     //
     // vad-simulator executable  - Runs VAD against given audio file and evaluates the results against a reference file
     //
-    const simulator_exe = b.addExecutable(.{
+    const sim_exe = b.addExecutable(.{
         .name = "simulator",
         .root_source_file = .{ .path = "src/simulator.zig" },
         .target = target,
         .optimize = optimize,
     });
-    try addClap(b, simulator_exe, common_options);
-    try addSndfile(b, simulator_exe, common_options);
-    try addKissFFT(b, simulator_exe, common_options);
-    try addOnnx(b, simulator_exe, common_options);
-    try setRPath(exe);
-    b.installArtifact(simulator_exe);
+    try addClap(b, sim_exe, common_options);
+    try addSndfile(b, sim_exe, common_options);
+    try addKissFFT(b, sim_exe, common_options);
+    try addOnnx(b, sim_exe, common_options);
+    try setRPath(sim_exe);
 
-    const simulator_run_cmd = b.addRunArtifact(simulator_exe);
-    simulator_run_cmd.step.dependOn(b.getInstallStep());
+    const sim_exe_install = b.addInstallArtifact(sim_exe, .{});
+    sim_exe_install.step.dependOn(&install_onnx_libs.step);
+    b.getInstallStep().dependOn(&sim_exe_install.step);
+
+    const sim_run_artifact = b.addRunArtifact(sim_exe);
+    sim_run_artifact.step.dependOn(&sim_exe_install.step);
     if (b.args) |args| {
-        simulator_run_cmd.addArgs(args);
+        sim_run_artifact.addArgs(args);
     }
-    const simulator_run_step = b.step("simulator", "Run the simulator (audio file + reference output)");
-    simulator_run_step.dependOn(&simulator_run_cmd.step);
+    const sim_run_step = b.step("simulator", "Run the simulator (audio file + reference output)");
+    sim_run_step.dependOn(&sim_run_artifact.step);
 }
 
-fn setRPath(exe: *std.Build.Step.Compile) !void {
+fn setRPath(exe: *Build.Step.Compile) !void {
     exe.root_module.addRPathSpecial("$ORIGIN/../lib");
     exe.each_lib_rpath = false;
 }
 
-var kiss_fft_lib: ?*std.Build.Step.Compile = null;
-fn addKissFFT(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
+var kiss_fft_lib: ?*Build.Step.Compile = null;
+fn addKissFFT(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void {
     const Pair = [2][]const u8;
     const macros: []const Pair = &.{
         .{ "kiss_fft_scalar", "float" },
@@ -187,18 +199,18 @@ fn addKissFFT(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOption
     exe.linkLibrary(kiss_fft_lib.?);
 }
 
-fn addSndfile(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
+fn addSndfile(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void {
     _ = options;
     _ = b;
     exe.linkSystemLibrary("sndfile");
 }
 
-fn addClap(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
+fn addClap(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void {
     _ = b;
     exe.root_module.addImport("clap", options.clap_dep.module("clap"));
 }
 
-fn addOnnx(b: *std.Build, exe: *std.Build.Step.Compile, options: CommonOptions) !void {
+fn addOnnx(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void {
     _ = b;
     exe.root_module.addImport("onnxruntime", options.onnx_dep.module("zig-onnxruntime"));
 }
