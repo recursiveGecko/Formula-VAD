@@ -83,8 +83,8 @@ pub fn main() !void {
     try stdout_w.print("False positives       (FP):  {d: >5.1} sec\n", .{stats.false_positives_sec});
     try stdout_w.print("False negatives       (FN):  {d: >5.1} sec\n", .{stats.false_negatives_sec});
     try stdout_w.print("True positive rate   (TPR):  {d: >6.2} %\n", .{stats.true_positive_rate * 100});
-    try stdout_w.print("False negative rate  (FNR):  {d: >6.2} %\n", .{stats.false_negative_rate * 100});
     try stdout_w.print("Precision            (PPV):  {d: >6.2} %\n", .{stats.precision * 100});
+    try stdout_w.print("False negative rate  (FNR):  {d: >6.2} %\n", .{stats.false_negative_rate * 100});
     try stdout_w.print("False discovery rate (FDR):  {d: >6.2} %\n", .{stats.false_discovery_rate * 100});
 }
 
