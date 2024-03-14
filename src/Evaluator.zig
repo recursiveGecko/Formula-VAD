@@ -12,21 +12,29 @@ const stderr = std.io.getStdErr();
 const stdout = std.io.getStdOut();
 const megabyte = 1024 * 1024;
 
+const params = clap.parseParamsComptime(
+    \\-h, --help              Display this help and exit.
+    \\-i, --input <path>      Input file to evaluate.
+    \\-r, --reference <path>  Reference file to evaluate against.
+    \\-f, --format <format>   Output format, 'plain' or 'json'
+    \\
+);
+
+const ResultJson = struct {
+    P: f32,
+    TP: f32,
+    FP: f32,
+    FN: f32,
+    TPR: f32,
+    PPV: f32,
+    FNR: f32,
+    FDR: f32,
+};
+
 const Self = @This();
 allocator: Allocator,
 input_segments: []SpeechSegment,
 reference_segments: []SpeechSegment,
-
-const params = clap.parseParamsComptime(
-    \\-h, --help             Display this help and exit.
-    \\-i, --input <str>      Input file to evaluate.
-    \\-r, --reference <str>  Reference file to evaluate against.
-    \\
-);
-
-fn printHelp() !void {
-    try clap.help(stdout.writer(), clap.Help, &params, .{});
-}
 
 /// Entrypoint for CLI invocation
 pub fn main() !void {
@@ -34,8 +42,13 @@ pub fn main() !void {
     var allocator = gpa.allocator();
     var stdout_w = stdout.writer();
 
+    const arg_parsers = .{
+        .path = clap.parsers.string,
+        .format = clap.parsers.enumeration(enum { plain, json }),
+    };
+
     var diag = clap.Diagnostic{};
-    var res = clap.parse(clap.Help, &params, clap.parsers.default, .{
+    var clap_res = clap.parse(clap.Help, &params, arg_parsers, .{
         .allocator = allocator,
         .diagnostic = &diag,
     }) catch |err| {
@@ -43,15 +56,19 @@ pub fn main() !void {
         diag.report(stderr.writer(), err) catch {};
         exit(1);
     };
-    defer res.deinit();
+    defer clap_res.deinit();
 
-    if (res.args.help == 1) {
+    const args = clap_res.args;
+
+    if (args.help == 1) {
         try printHelp();
         return;
     }
 
-    const input_file_path = res.args.input;
-    const ref_file_path = res.args.reference;
+    const format = args.format orelse .plain;
+
+    const input_file_path = args.input;
+    const ref_file_path = args.reference;
 
     if (input_file_path == null or ref_file_path == null) {
         try printHelp();
@@ -75,17 +92,41 @@ pub fn main() !void {
     };
 
     const stats = try statistics.fromEvaluator(evaluator, stat_config);
-    try stdout_w.print("\n=> Definitions: \n\n", .{});
-    try stdout_w.writeAll(report_generator.definitions);
-    try stdout_w.print("\n\n=> Report: \n\n", .{});
-    try stdout_w.print("Total speech duration  (P):  {d: >5.1} sec\n", .{stats.total_positives_sec});
-    try stdout_w.print("True positives        (TP):  {d: >5.1} sec\n", .{stats.true_positives_sec});
-    try stdout_w.print("False positives       (FP):  {d: >5.1} sec\n", .{stats.false_positives_sec});
-    try stdout_w.print("False negatives       (FN):  {d: >5.1} sec\n", .{stats.false_negatives_sec});
-    try stdout_w.print("True positive rate   (TPR):  {d: >6.2} %\n", .{stats.true_positive_rate * 100});
-    try stdout_w.print("Precision            (PPV):  {d: >6.2} %\n", .{stats.precision * 100});
-    try stdout_w.print("False negative rate  (FNR):  {d: >6.2} %\n", .{stats.false_negative_rate * 100});
-    try stdout_w.print("False discovery rate (FDR):  {d: >6.2} %\n", .{stats.false_discovery_rate * 100});
+
+    switch (format) {
+        .plain => {
+            try stdout_w.print("\n=> Definitions: \n\n", .{});
+            try stdout_w.writeAll(report_generator.definitions);
+            try stdout_w.print("\n\n=> Report: \n\n", .{});
+            try stdout_w.print("Total speech duration  (P):  {d: >5.1} sec\n", .{stats.total_positives_sec});
+            try stdout_w.print("True positives        (TP):  {d: >5.1} sec\n", .{stats.true_positives_sec});
+            try stdout_w.print("False positives       (FP):  {d: >5.1} sec\n", .{stats.false_positives_sec});
+            try stdout_w.print("False negatives       (FN):  {d: >5.1} sec\n", .{stats.false_negatives_sec});
+            try stdout_w.print("True positive rate   (TPR):  {d: >6.2} %\n", .{stats.true_positive_rate * 100});
+            try stdout_w.print("Precision            (PPV):  {d: >6.2} %\n", .{stats.precision * 100});
+            try stdout_w.print("False negative rate  (FNR):  {d: >6.2} %\n", .{stats.false_negative_rate * 100});
+            try stdout_w.print("False discovery rate (FDR):  {d: >6.2} %\n", .{stats.false_discovery_rate * 100});
+        },
+        .json => {
+            const res = ResultJson{
+                .P = stats.total_positives_sec,
+                .TP = stats.true_positives_sec,
+                .FP = stats.false_positives_sec,
+                .FN = stats.false_negatives_sec,
+                .TPR = stats.true_positive_rate,
+                .PPV = stats.precision,
+                .FNR = stats.false_negative_rate,
+                .FDR = stats.false_discovery_rate,
+            };
+
+            try std.json.stringify(res, .{}, stdout_w);
+            try stdout_w.writeAll("\n");
+        },
+    }
+}
+
+fn printHelp() !void {
+    try clap.help(stdout.writer(), clap.Help, &params, .{});
 }
 
 pub fn initAndRun(
