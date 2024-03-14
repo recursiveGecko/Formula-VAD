@@ -71,7 +71,7 @@ pub fn build(b: *Build) !void {
     b.getInstallStep().dependOn(&main_exe_install.step);
 
     const main_run_artifact = b.addRunArtifact(main_exe);
-    main_run_artifact.step.dependOn(&main_exe.step);
+    main_run_artifact.step.dependOn(&main_exe_install.step);
 
     if (b.args) |args| {
         main_run_artifact.addArgs(args);
@@ -91,15 +91,8 @@ pub fn build(b: *Build) !void {
     });
     try addKissFFT(b, test_exe, common_options);
     try addOnnx(b, test_exe, common_options);
-    try setRPath(test_exe);
-
-    const test_exe_install = b.addInstallArtifact(test_exe, .{});
-    test_exe_install.step.dependOn(&install_onnx_libs.step);
-    b.getInstallStep().dependOn(&test_exe_install.step);
 
     const test_run_artifact = b.addRunArtifact(test_exe);
-    test_run_artifact.step.dependOn(&test_exe.step);
-
     const test_run_step = b.step("test", "Run unit tests");
     test_run_step.dependOn(&test_run_artifact.step);
 
@@ -119,7 +112,7 @@ pub fn build(b: *Build) !void {
     b.getInstallStep().dependOn(&eval_exe_install.step);
 
     const eval_run_artifact = b.addRunArtifact(eval_exe);
-    eval_run_artifact.step.dependOn(b.getInstallStep());
+    eval_run_artifact.step.dependOn(&eval_exe_install.step);
     if (b.args) |args| {
         eval_run_artifact.addArgs(args);
     }
