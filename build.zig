@@ -44,8 +44,8 @@ pub fn build(b: *Build) !void {
     //
     const install_onnx_libs = b.addInstallDirectory(.{
         .source_dir = onnx_dep.module("onnxruntime_lib").root_source_file.?,
-        .install_dir = .lib,
-        .install_subdir = ".",
+        .install_dir = .bin,
+        .install_subdir = "lib",
     });
 
     //
@@ -148,7 +148,7 @@ pub fn build(b: *Build) !void {
 }
 
 fn setRPath(exe: *Build.Step.Compile) !void {
-    exe.root_module.addRPathSpecial("$ORIGIN/../lib");
+    exe.root_module.addRPathSpecial("$ORIGIN/lib");
     exe.each_lib_rpath = false;
 }
 
