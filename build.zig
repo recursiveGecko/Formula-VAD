@@ -97,10 +97,10 @@ pub fn build(b: *Build) !void {
     test_run_step.dependOn(&test_run_artifact.step);
 
     //
-    // vad-evaluator executable (evaluates given input against a reference file)
+    // evaluator executable (evaluates given input against a reference file)
     //
     const eval_exe = b.addExecutable(.{
-        .name = "vad-evaluator",
+        .name = "evaluator",
         .root_source_file = .{ .path = "src/Evaluator.zig" },
         .target = target,
         .optimize = optimize,
