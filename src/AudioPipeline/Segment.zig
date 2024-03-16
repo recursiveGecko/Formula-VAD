@@ -18,7 +18,7 @@ const AudioBuffer = @import("../audio_utils/AudioBuffer.zig");
 
 const Self = @This();
 
-/// The index/sample number of the first sample in the segment relative to the start of the pipeline.
+/// The index/sample number of the first sample in the segment
 index: u64,
 /// The number of samples in the segment.
 length: usize,
@@ -42,7 +42,7 @@ pub fn initWithCapacity(allocator: Allocator, n_channels: usize, length: usize) 
     }
 
     const self = Self{
-        .index = undefined,
+        .index = 0,
         .length = length,
         .allocator = allocator,
         .channel_pcm_buf = channel_pcm_buf_,

@@ -235,3 +235,7 @@ fn stateMachineStep(
         }
     }
 }
+
+test {
+    _ = std.testing.refAllDecls(@This());
+}

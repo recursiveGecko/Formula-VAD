@@ -89,6 +89,8 @@ pub fn build(b: *Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    try addClap(b, test_exe, common_options);
+    try addSndfile(b, test_exe, common_options);
     try addKissFFT(b, test_exe, common_options);
     try addOnnx(b, test_exe, common_options);
 
