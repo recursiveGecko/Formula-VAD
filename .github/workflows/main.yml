@@ -19,6 +19,7 @@ jobs:
 
       - uses: goto-bus-stop/setup-zig@v2.2.0
         with:
+          cache: true
           version: ${{ env.ZIG_VERSION }}
 
       - run: sudo apt install --yes libsndfile1 libsndfile1-dev
