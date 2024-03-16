@@ -412,8 +412,10 @@ fn alignedPtrCast(opaque_ptr: *anyopaque, comptime T: type) *T {
 }
 
 test {
-    _ = AudioPipeline;
     _ = @import("./uuid.zig");
     _ = @import("./structures/MultiRingBuffer.zig");
+    _ = @import("./simulator.zig");
     _ = @import("./Evaluator.zig");
+
+    std.testing.refAllDecls(@This());
 }

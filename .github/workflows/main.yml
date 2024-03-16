@@ -21,5 +21,6 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
 
+      - run: apt install --yes libsndfile1 libsndfile1-dev
       - run: zig build test
       - run: zig fmt --check src
