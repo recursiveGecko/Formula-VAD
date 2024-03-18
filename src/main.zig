@@ -153,8 +153,7 @@ pub fn main() !void {
         pipeline_config,
         AudioPipeline.Callbacks{
             .ctx = &process_loop,
-            .on_original_recording = &onOriginalRecording,
-            .on_denoised_recording = &onDenoisedRecording,
+            .on_recording = &onOriginalRecording,
         },
     );
     errdefer pipeline.deinit();
@@ -318,11 +317,6 @@ fn reportError(
 fn onOriginalRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
     const process_loop: *ProcessLoopState = alignedPtrCast(opaque_ctx, ProcessLoopState);
     onRecording(process_loop, audio_buffer, .original);
-}
-
-fn onDenoisedRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
-    const process_loop: *ProcessLoopState = alignedPtrCast(opaque_ctx, ProcessLoopState);
-    onRecording(process_loop, audio_buffer, .denoised);
 }
 
 fn onRecording(

@@ -34,7 +34,7 @@ pub fn write(
 
     self.vad_metadata.push(
         volume_analysis,
-        input.segment.length,
+        input.segment.length(),
     );
 
     const result = BufferedStep.Result{

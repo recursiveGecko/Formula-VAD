@@ -29,11 +29,6 @@ const PipelineContext = struct {
         self.onRecording(audio_buffer, .original);
     }
 
-    pub fn onDenoisedRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
-        const self = castToSelf(opaque_ctx);
-        self.onRecording(audio_buffer, .denoised);
-    }
-
     pub fn onRecording(
         self: *Ctx,
         audio_buffer: *const AudioBuffer,
@@ -70,8 +65,7 @@ const PipelineContext = struct {
     pub fn toPipelineCallbacks(self: *Ctx) AudioPipeline.Callbacks {
         return AudioPipeline.Callbacks{
             .ctx = self,
-            .on_original_recording = &Ctx.onOriginalRecording,
-            .on_denoised_recording = &Ctx.onDenoisedRecording,
+            .on_recording = &Ctx.onOriginalRecording,
         };
     }
 

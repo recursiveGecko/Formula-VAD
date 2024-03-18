@@ -1,17 +1,34 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
-const SplitSlice = @import("./SplitSlice.zig").SplitSlice;
 
 pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
     return struct {
         const Self = @This();
         allocator: Allocator,
-        capacity: usize,
+        capacity: TCounter,
         n_channels: usize,
         raw_buffer: []TData,
         channel_buffers: [][]TData,
         total_write_count: TCounter = 0,
+        temp_split_slice: SplitSlice,
+
+        pub const SplitSlice = struct {
+            /// sample index of the first sample in `first` slice
+            first_index: TCounter = 0,
+            first: [][]TData,
+            /// sample index of the first sample in `second` slice
+            second_index: TCounter = 0,
+            second: [][]TData,
+
+            pub fn firstLength(self: *const @This()) TCounter {
+                return self.first[0].len;
+            }
+
+            pub fn secondLength(self: *const @This()) TCounter {
+                return self.second[0].len;
+            }
+        };
 
         pub fn init(allocator: Allocator, n_channels: usize, capacity: usize) !Self {
             var raw_buffer = try allocator.alloc(TData, n_channels * capacity);
@@ -19,6 +36,11 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
 
             const channel_buffers = try allocator.alloc([]TData, n_channels);
             errdefer allocator.free(channel_buffers);
+
+            const temp_split_slice = SplitSlice{
+                .first = try allocator.alloc([]TData, n_channels),
+                .second = try allocator.alloc([]TData, n_channels),
+            };
 
             for (0..n_channels) |i| {
                 const from = i * capacity;
@@ -32,6 +54,7 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
                 .capacity = capacity,
                 .raw_buffer = raw_buffer,
                 .channel_buffers = channel_buffers,
+                .temp_split_slice = temp_split_slice,
             };
 
             return self;
@@ -40,6 +63,8 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
         pub fn deinit(self: *Self) void {
             self.allocator.free(self.raw_buffer);
             self.allocator.free(self.channel_buffers);
+            self.allocator.free(self.temp_split_slice.first);
+            self.allocator.free(self.temp_split_slice.second);
         }
 
         pub fn writeIndex(self: *const Self) usize {
@@ -156,17 +181,12 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
             return n_write_total_count;
         }
 
-        /// Reads a range of elements from the ring buffer without copying it.
-        /// Caller must provide a slice of SplitSlices that will effectively store pointers to the data
-        /// Caller must not modify the data without creating a copy.
-        pub fn readSlice(
-            self: *const Self,
-            result_slices: []SplitSlice(TData),
+        /// Returns a split slice of multi-channel ring buffer
+        pub fn sliceBuffer(
+            self: *Self,
             abs_from: TCounter,
             abs_to: TCounter,
-        ) !void {
-            assert(result_slices.len == self.n_channels);
-
+        ) !*const SplitSlice {
             // Valid slicing range
             const max_abs_idx = self.total_write_count;
             const min_abs_idx = max_abs_idx - @min(self.capacity, max_abs_idx);
@@ -183,36 +203,34 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
                 return error.IndexOutOfBounds;
             }
 
+            const total_length = abs_to - abs_from;
+
             // Convert absolute indices to relative indices
-            const rel_from = abs_from % self.capacity;
-            const rel_to = abs_to % self.capacity;
+            const rel_start = abs_from % self.capacity;
 
-            // Default case, the requested range doesn't wrap around the end of the buffer
-            var first_to: usize = rel_to;
-            var second_to: usize = 0;
+            // number of samples to copy from `rel_start` position to the end of the buffer
+            const n_to_end = @min(total_length, self.capacity - rel_start);
 
-            // The range wraps around, we need to split the slice into two parts
-            // Note: If the indices are equal, it means the entire buffer was requested
-            if (rel_to <= rel_from) {
-                first_to = self.capacity;
-                second_to = rel_to;
-            }
+            // std.debug.print("abs: [{d:10}, {d:10} )   rel: [{d:10} .. +{d:8} )\n", .{ abs_from, abs_to, rel_start, n_to_end });
+
+            var split_slice = &self.temp_split_slice;
+
+            split_slice.first_index = abs_from;
+            split_slice.second_index = abs_from + n_to_end;
 
             for (0..self.n_channels) |channel_idx| {
-                result_slices[channel_idx] = SplitSlice(TData){
-                    .allocator = null,
-                    .owned_slices = .none,
-                    .first = self.channel_buffers[channel_idx][rel_from..first_to],
-                    .second = self.channel_buffers[channel_idx][0..second_to],
-                };
+                const src_channel = self.channel_buffers[channel_idx];
+
+                split_slice.first[channel_idx] = src_channel[rel_start .. rel_start + n_to_end];
+                split_slice.second[channel_idx] = src_channel[0 .. total_length - n_to_end];
             }
+
+            return &self.temp_split_slice;
         }
     };
 }
 
-const expect = std.testing.expect;
-const expectEqual = std.testing.expectEqual;
-const expectEqualSlices = std.testing.expectEqualSlices;
+const t = std.testing;
 const test_allocator = std.testing.allocator;
 
 test "write() ring buffer handling" {
@@ -222,43 +240,67 @@ test "write() ring buffer handling" {
     const pcm = mr_buffer.channel_buffers[0];
     @memset(pcm, 0);
 
-    _ = mr_buffer.write(&.{&.{ 0, 1, 2, 9, 9, 9 }}, 0, 2);
-    // write index:    v
-    // expected:   [0, _, _, _, _]
-    try expectEqualSlices(i32, &.{ 0, 1, 0, 0, 0 }, pcm);
+    _ = mr_buffer.write(&.{&.{ 8, 1, 2, 9, 9, 9 }}, 0, 2);
+    // write index:       v
+    // expected:   [8, 1, _, _, _]
+    try t.expectEqualSlices(i32, &.{ 8, 1, 0, 0, 0 }, pcm);
 
-    _ = mr_buffer.write(&.{&.{ 0, 1, 2, 9, 9, 9 }}, 1, 1);
+    _ = mr_buffer.write(&.{&.{ 8, 1, 2, 9, 9, 9 }}, 1, 1);
     // write index:          v
-    // expected:   [0, 1, 1, _, _]
-    try expectEqualSlices(i32, &.{ 0, 1, 1, 0, 0 }, pcm);
+    // expected:   [8, 1, 1, _, _]
+    try t.expectEqualSlices(i32, &.{ 8, 1, 1, 0, 0 }, pcm);
 
     _ = mr_buffer.write(&.{&.{ 4, 5, 6, 7, 8, 9 }}, 0, 9999);
     // write index:             v
     // expected:   [6, 7, 8, 9, 5]
-    try expectEqualSlices(i32, &.{ 6, 7, 8, 9, 5 }, pcm);
+    try t.expectEqualSlices(i32, &.{ 6, 7, 8, 9, 5 }, pcm);
 
     _ = mr_buffer.write(&.{&.{ 2, 3, 4 }}, 0, 9999);
     // write index:       v
     // expected:   [3, 4, 8, 9, 2]
-    try expectEqualSlices(i32, &.{ 3, 4, 8, 9, 2 }, pcm);
+    try t.expectEqualSlices(i32, &.{ 3, 4, 8, 9, 2 }, pcm);
 
     _ = mr_buffer.write(&.{&.{ 0, 0, 0, 0, 0, 50, 60, 70, 80, 90 }}, 0, 9999);
     // write index:         v
     // expected:   [80, 90, 50, 60, 70]
-    try expectEqualSlices(i32, &.{ 80, 90, 50, 60, 70 }, pcm);
+    try t.expectEqualSlices(i32, &.{ 80, 90, 50, 60, 70 }, pcm);
 
     _ = mr_buffer.write(&.{&.{ -1, 0, 2, 0 }}, 0, 9999);
     // write index:    v
     // expected:   [0, 90, -1, 0, 2]
-    try expectEqualSlices(i32, &.{ 0, 90, -1, 0, 2 }, pcm);
+    try t.expectEqualSlices(i32, &.{ 0, 90, -1, 0, 2 }, pcm);
 
     _ = mr_buffer.write(&.{&.{ 1, 2, 3, 4, 5, 6, 7, 8, 9, -1, -2 }}, 4, 3);
     // write index:             v
     // expected:   [0, 5, 6, 7, 2]
-    try expectEqualSlices(i32, &.{ 0, 5, 6, 7, 2 }, pcm);
+    try t.expectEqualSlices(i32, &.{ 0, 5, 6, 7, 2 }, pcm);
 
     _ = mr_buffer.write(&.{&.{ 1, 2, 3, 4, 5, 6, 7, 8, 9, -1, -2 }}, 8, 3);
     // write index:         v
     // expected:   [-1, -2, 6, 7, 9]
-    try expectEqualSlices(i32, &.{ -1, -2, 6, 7, 9 }, pcm);
+    try t.expectEqualSlices(i32, &.{ -1, -2, 6, 7, 9 }, pcm);
+}
+
+test "sliceBuffer()" {
+    var mr_buffer = try MultiRingBuffer(i32, u64).init(test_allocator, 1, 5);
+    defer mr_buffer.deinit();
+
+    const pcm = mr_buffer.channel_buffers[0];
+    @memset(pcm, 0);
+
+    // write 8 samples to the buffer
+    _ = mr_buffer.write(&.{&.{ 7, 1, 2, 9, 4, 3, 8, 5 }}, 0, 1000);
+    // write index:          v
+    // expected:   [3, 8, 5, 9, 4]
+    try t.expectEqualSlices(i32, &.{ 3, 8, 5, 9, 4 }, pcm);
+
+    const split_slice = try mr_buffer.sliceBuffer(3, 8);
+
+    try t.expectEqualSlices(i32, &.{ 9, 4 }, split_slice.first[0]);
+    try t.expectEqual(3, split_slice.first_index);
+    try t.expectEqual(2, split_slice.firstLength());
+
+    try t.expectEqualSlices(i32, &.{ 3, 8, 5 }, split_slice.second[0]);
+    try t.expectEqual(5, split_slice.second_index);
+    try t.expectEqual(3, split_slice.secondLength());
 }

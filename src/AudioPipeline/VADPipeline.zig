@@ -5,7 +5,6 @@ const Allocator = std.mem.Allocator;
 const BufferedFFT = @import("./BufferedFFT.zig");
 const window_fn = @import("../audio_utils/window_fn.zig");
 const AudioPipeline = @import("../AudioPipeline.zig");
-const SplitSlice = @import("../structures/SplitSlice.zig").SplitSlice;
 const Segment = @import("./Segment.zig");
 const SegmentWriter = @import("./SegmentWriter.zig");
 const VADMachine = @import("./VADMachine.zig");
@@ -39,8 +38,6 @@ sample_rate: usize,
 n_channels: usize,
 /// Number of samples VAD has read from the pipeline
 pipeline_read_count: u64 = 0,
-/// Temporarily stores slices of pipeline audio data
-temp_input_segment: Segment,
 buffered_volume_analyzer: BufferedVolumeAnalyzer,
 buffered_denoiser: BufferedDenoiser,
 buffered_fft: BufferedFFT,
@@ -53,25 +50,10 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     const n_channels = pipeline.config.n_channels;
 
     if (sample_rate != 48000) {
-        // RNNoise can only handle 48kHz audio
-        return error.InvalidSampleRate;
+        std.debug.panic("Unsupported sample rate: {d}", .{sample_rate});
     }
 
     var allocator = pipeline.allocator;
-
-    var temp_input_segment = Segment{
-        .channel_pcm_buf = try allocator.alloc(SplitSlice(f32), n_channels),
-        .allocator = allocator,
-        .index = undefined,
-        .length = undefined,
-    };
-    errdefer temp_input_segment.deinit();
-    for (0..n_channels) |i| {
-        temp_input_segment.channel_pcm_buf[i] = .{
-            .owned_slices = .none,
-            .first = &.{},
-        };
-    }
 
     var buffered_volume_analyzer = try BufferedVolumeAnalyzer.init(allocator);
     errdefer buffered_volume_analyzer.deinit();
@@ -98,7 +80,6 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
         .config = config,
         .n_channels = n_channels,
         .sample_rate = sample_rate,
-        .temp_input_segment = temp_input_segment,
         .buffered_volume_analyzer = buffered_volume_analyzer,
         .buffered_denoiser = buffered_denoiser,
         .buffered_fft = buffered_fft,
@@ -131,7 +112,6 @@ pub fn deinit(self: *Self) void {
         self.allocator.free(alt_vad);
     }
     self.vad_machine.deinit();
-    self.temp_input_segment.deinit();
     self.buffered_volume_analyzer.deinit();
     self.buffered_denoiser.deinit();
     self.buffered_fft.deinit();
@@ -144,24 +124,36 @@ pub fn run(self: *Self) !void {
 fn collectInputStep(self: *Self) !void {
     const frame_size = self.buffered_denoiser.getChunkSize();
     const p = self.pipeline;
-    const p_total_write_count = p.totalWriteCount();
 
-    // While there are enough input samples to form a RNNoise frame
-    while (p_total_write_count - self.pipeline_read_count >= frame_size) {
+    while (p.totalWriteCount() - self.pipeline_read_count >= frame_size) {
         const from = self.pipeline_read_count;
         const to = from + frame_size;
         self.pipeline_read_count = to;
 
-        const input_segment: *Segment = &self.temp_input_segment;
-        try self.pipeline.sliceSegment(input_segment, from, to);
+        const split_slice = try self.pipeline.sliceSegment(from, to);
 
-        const input_step_result = BufferedStep.Result{
-            .segment = input_segment,
+        const split_input_1 = BufferedStep.Result{
+            .segment = &Segment{
+                .index = split_slice.first_index,
+                .channel_pcm_buf = split_slice.first,
+            },
             .metadata = .{},
         };
-        var analyzed_step_result = self.buffered_volume_analyzer.write(&input_step_result);
+        const split_input_2 = BufferedStep.Result{
+            .segment = &Segment{
+                .index = split_slice.second_index,
+                .channel_pcm_buf = split_slice.second,
+            },
+            .metadata = .{},
+        };
 
-        try self.denoiserStep(&analyzed_step_result);
+        // std.debug.print("collectInput: {d}, {d}\n", .{ split_input_1.segment.length(), split_input_2.segment.length() });
+
+        const result_1 = self.buffered_volume_analyzer.write(&split_input_1);
+        const result_2 = self.buffered_volume_analyzer.write(&split_input_2);
+
+        try self.denoiserStep(&result_1);
+        try self.denoiserStep(&result_2);
     }
 }
 
@@ -180,11 +172,10 @@ fn denoiserStep(
             .metadata = denoised_result.metadata.?,
         };
 
-        try self.pipeline.pushDenoisedSamples(denoised_result.denoised_segment.?);
         try self.fftStep(&fft_input);
 
         if (denoised_result.n_remaining_input == 0) return;
-        input_offset = input.segment.length - denoised_result.n_remaining_input;
+        input_offset = input.segment.length() - denoised_result.n_remaining_input;
     }
 }
 
@@ -202,7 +193,7 @@ fn fftStep(
         try self.stateMachineStep(&result.fft_result.?);
 
         if (result.n_remaining_input == 0) return;
-        input_offset = input.segment.length - result.n_remaining_input;
+        input_offset = input.segment.length() - result.n_remaining_input;
     }
 }
 

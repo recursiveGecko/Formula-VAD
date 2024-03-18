@@ -4,7 +4,6 @@ const Allocator = std.mem.Allocator;
 const FFT = @import("../FFT.zig");
 const window_fn = @import("../audio_utils/window_fn.zig");
 const AudioPipeline = @import("../AudioPipeline.zig");
-const SplitSlice = @import("../structures/SplitSlice.zig");
 const Segment = @import("./Segment.zig");
 const SegmentWriter = @import("./SegmentWriter.zig");
 const BufferedStep = @import("./BufferedStep.zig");
@@ -82,8 +81,6 @@ pub fn init(allocator: Allocator, config: Config) !Self {
 
     var buffer = try SegmentWriter.init(allocator, config.n_channels, config.fft_size);
     errdefer buffer.deinit();
-    // Pipeline sample number that corresponds to the start of the FFT buffer
-    buffer.segment.index = 0;
 
     const temp_result = try Result.init(
         allocator,
@@ -131,8 +128,8 @@ pub fn write(
     input: *const BufferedStep.Result,
     input_offset: usize,
 ) !WriteResult {
-    const n_written = try self.buffer.write(input.segment, input_offset, null);
-    const n_remaining_input = input.segment.length - input_offset - n_written;
+    const n_written = try self.buffer.write(input.segment, input_offset);
+    const n_remaining_input = input.segment.length() - input_offset - n_written;
 
     self.vad_metadata.push(
         input.metadata,
@@ -147,9 +144,9 @@ pub fn write(
     }
 
     defer self.buffer.reset(input.segment.index + input_offset + n_written);
-    try self.fft(self.buffer.segment, &self.temp_result);
+    try self.fft(self.buffer.segment_view, &self.temp_result);
 
-    self.temp_result.index = self.buffer.segment.index;
+    self.temp_result.index = self.buffer.segment_view.index;
     self.temp_result.vad_metadata = self.vad_metadata.toResult();
 
     self.vad_metadata = .{};

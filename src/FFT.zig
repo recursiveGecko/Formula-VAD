@@ -7,7 +7,6 @@ const kissfft = @cImport({
     @cInclude("kiss_fft.h");
     @cInclude("kiss_fftr.h");
 });
-const SplitSlice = @import("./structures/SplitSlice.zig").SplitSlice;
 
 pub const Complex = extern struct {
     r: f32,
@@ -84,11 +83,11 @@ pub fn deinit(self: *Self) void {
 
 pub fn fft(
     self: *Self,
-    samples: SplitSlice(f32),
+    samples: []const f32,
     window: []const f32,
     bins: []Complex,
 ) !void {
-    if (samples.first.len + samples.second.len != self.n_fft) {
+    if (samples.len != self.n_fft) {
         return error.InvalidSamplesLength;
     }
 
@@ -182,17 +181,13 @@ pub fn binToFreq(self: Self, bin_index: usize) !f32 {
 /// Loads samples into the KissFFT input buffer for forward FFT
 fn loadSamplesFwd(
     self: *Self,
-    samples: SplitSlice(f32),
+    samples: []const f32,
     window: []const f32,
 ) []const f32 {
-    std.debug.assert(samples.first.len + samples.second.len == window.len);
+    std.debug.assert(samples.len == window.len);
 
-    for (samples.first, 0..) |sample, abs_idx| {
-        self.buf_real[abs_idx] = sample * window[abs_idx];
-    }
-
-    for (samples.second, samples.first.len..) |sample, abs_idx| {
-        self.buf_real[abs_idx] = sample * window[abs_idx];
+    for (0..samples.len) |i| {
+        self.buf_real[i] = samples[i] * window[i];
     }
 
     return self.buf_real;

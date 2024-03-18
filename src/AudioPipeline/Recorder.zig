@@ -3,7 +3,6 @@ const log = std.log.scoped(.recorder);
 const Allocator = std.mem.Allocator;
 const Segment = @import("./Segment.zig");
 const SegmentWriter = @import("./SegmentWriter.zig");
-const SplitSlice = @import("../structures/SplitSlice.zig").SplitSlice;
 const AudioBuffer = @import("../audio_utils/AudioBuffer.zig");
 const audio_utils = @import("../audio_utils.zig");
 
@@ -17,14 +16,15 @@ segment_writer: SegmentWriter,
 last_recording_end_index: u64 = 0,
 
 pub fn init(allocator: Allocator, n_channels: usize, sample_rate: usize) !Self {
-    var self = Self{
+    const initial_length = sample_rate * 10;
+
+    const self = Self{
         .allocator = allocator,
         .n_channels = n_channels,
         .sample_rate = sample_rate,
-        .segment_writer = undefined,
+        .segment_writer = try SegmentWriter.init(allocator, n_channels, initial_length),
     };
 
-    try self.allocNewWriter();
     return self;
 }
 
@@ -37,29 +37,28 @@ pub fn isRecording(self: Self) bool {
 }
 
 pub fn currentCapacity(self: Self) usize {
-    return self.segment_writer.segment.length;
+    return self.segment_writer.internal_segment.length();
 }
 
 /// Index of the first saved frame (sample) in the recording
 pub fn startIndex(self: Self) u64 {
-    return self.segment_writer.segment.index;
+    return self.segment_writer.segment_view.index;
 }
 
 /// Index following the last saved frame (sample) in the recording
 pub fn endIndex(self: Self) u64 {
-    return self.segment_writer.segment.index + self.segment_writer.write_index;
+    return self.segment_writer.segment_view.index + self.segment_writer.segment_view.length();
 }
 
 pub fn start(self: *Self, start_index: u64) void {
     log.info("Starting recording. start_index: {d}", .{start_index});
 
-    self.segment_writer.segment.index = start_index;
-    self.segment_writer.write_index = 0;
+    self.segment_writer.reset(start_index);
     self.status = .recording;
 }
 
 pub fn write(self: *Self, segment: *const Segment) !void {
-    const required_length = self.segment_writer.write_index + segment.length;
+    const required_length = self.segment_writer.write_index + segment.length();
 
     if (required_length > self.currentCapacity()) {
         // When resizing, add at least 10 seconds worth of samples to the current capacity.
@@ -67,13 +66,13 @@ pub fn write(self: *Self, segment: *const Segment) !void {
         try self.segment_writer.resize(new_length);
     }
 
-    const written = try self.segment_writer.write(segment, 0, null);
-    std.debug.assert(written == segment.length);
+    const written = try self.segment_writer.write(segment, 0);
+    std.debug.assert(written == segment.length());
 }
 
 pub fn finalize(self: *Self, to_frame: u64, keep: bool) !?AudioBuffer {
     defer {
-        self.segment_writer.write_index = 0;
+        self.segment_writer.reset(0);
         self.status = .idle;
     }
 
@@ -95,12 +94,10 @@ pub fn finalize(self: *Self, to_frame: u64, keep: bool) !?AudioBuffer {
         }
 
         const n_to_keep = to_frame - self.startIndex();
-        try self.segment_writer.resize(n_to_keep);
+        const segment = self.segment_writer.segment_view;
+        try segment.clipView(0, n_to_keep);
 
-        const segment = self.segment_writer.segment;
-        try self.allocNewWriter();
-
-        const audio_buffer = try segmentToAudioBuffer(segment, self.sample_rate);
+        const audio_buffer = try segmentToAudioBuffer(self.allocator, segment, self.sample_rate);
 
         self.last_recording_end_index = to_frame;
         return audio_buffer;
@@ -127,45 +124,35 @@ fn findBestChannel(segment: Segment) usize {
     return best_channel;
 }
 
-fn segmentToAudioBuffer(segment: Segment, sample_rate: usize) !AudioBuffer {
-    defer segment.allocator.?.free(segment.channel_pcm_buf);
+fn segmentToAudioBuffer(
+    allocator: Allocator,
+    segment: Segment,
+    sample_rate: usize,
+) !AudioBuffer {
+    const best_channel_idx = findBestChannel(segment);
 
-    const best_channel = findBestChannel(segment);
-
-    const allocator = segment.allocator.?;
-    const n_channels = segment.channel_pcm_buf.len;
-
-    var channel_pcm_buf = try allocator.alloc([]f32, 1);
+    const channel_pcm_buf = try allocator.alloc([]f32, 1);
     errdefer allocator.free(channel_pcm_buf);
 
-    channel_pcm_buf[0] = segment.channel_pcm_buf[best_channel].first;
+    const src_channel = segment.channel_pcm_buf[best_channel_idx];
+    const dst_channel = try allocator.alloc(f32, segment.length());
+    errdefer allocator.free(dst_channel);
 
-    // Free all other channels
-    for (0..n_channels) |i| {
-        std.debug.assert(segment.channel_pcm_buf[i].first.len == segment.length);
-        std.debug.assert(segment.channel_pcm_buf[i].second.len == 0);
+    // copy best channel
+    @memcpy(dst_channel, src_channel);
+    channel_pcm_buf[0] = dst_channel;
 
-        if (i == best_channel) continue;
-
-        segment.channel_pcm_buf[i].deinit();
-    }
+    const duration_sec = @as(f32, @floatFromInt(segment.length())) / @as(f32, @floatFromInt(sample_rate));
 
     const audio_buffer = AudioBuffer{
         .allocator = allocator,
-        .length = segment.length,
+        .length = segment.length(),
         .sample_rate = sample_rate,
         .n_channels = 1,
-        .duration_seconds = @as(f32, @floatFromInt(segment.length)) / @as(f32, @floatFromInt(sample_rate)),
+        .duration_seconds = duration_sec,
         .channel_pcm_buf = channel_pcm_buf,
         .global_start_frame_number = segment.index,
     };
 
     return audio_buffer;
-}
-
-fn allocNewWriter(self: *Self) !void {
-    const initial_length = self.sample_rate * 10;
-
-    const segment_writer = try SegmentWriter.init(self.allocator, self.n_channels, initial_length);
-    self.segment_writer = segment_writer;
 }

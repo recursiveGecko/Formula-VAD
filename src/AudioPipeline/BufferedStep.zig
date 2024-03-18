@@ -142,7 +142,7 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
 
     var total_written: usize = 0;
     while (true) {
-        const n_written = try self.buffer_writer.write(prev_result.segment, total_written, null);
+        const n_written = try self.buffer_writer.write(prev_result.segment, total_written);
         total_written += n_written;
 
         self.buffer_metadata.push(prev_result.metadata, n_written);
@@ -152,7 +152,7 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
             const buffer_metadata = self.buffer_metadata.toResult();
             const this_result = Result{
                 .metadata = buffer_metadata,
-                .segment = &self.buffer_writer.segment,
+                .segment = &self.buffer_writer.segment_view,
             };
 
             // std.debug.print("- Buffer for {s:15}   sample index before calling processor: {d}\n", .{ self.name, this_result.segment.index });
@@ -171,13 +171,13 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
             // std.debug.print("+ Buffer for {s:15}    sample index after calling processor: {d}\n", .{ self.name, self.buffer_writer.segment.index });
         }
 
-        if (total_written == prev_result.segment.length) {
+        if (total_written == prev_result.segment.length()) {
             break;
-        } else if (total_written > prev_result.segment.length) {
+        } else if (total_written > prev_result.segment.length()) {
             @setCold(true);
             std.debug.panic(
                 "BufferedStep '{s}' wrote more samples ({d}) than the input ({d})",
-                .{ self.name, total_written, prev_result.segment.length },
+                .{ self.name, total_written, prev_result.segment.length() },
             );
         }
     }
@@ -285,27 +285,17 @@ test "BufferedStep chain" {
 
         pub fn process(self: *@This(), prev_result: *const Result) *const Result {
             const in_channels = prev_result.segment.channel_pcm_buf;
-            const out_split_slice = self.out_segment.channel_pcm_buf[0];
+            const out_channel = self.out_segment.channel_pcm_buf[0];
 
-            for (in_channels) |in_channel| {
-                if (in_channel.second.len > 0) {
-                    @panic("Expected in_channels slices to not be split");
-                }
-            }
-
-            if (out_split_slice.second.len > 0) {
-                @panic("Expected out_slice to not be split");
-            }
-
-            for (0..prev_result.segment.length) |i_sample| {
+            for (0..prev_result.segment.length()) |i_sample| {
                 var sum: f32 = 0;
                 for (0..in_channels.len) |i_chan| {
-                    sum += in_channels[i_chan].first[i_sample];
+                    sum += in_channels[i_chan][i_sample];
                 }
                 const n_channels_f: f32 = @floatFromInt(in_channels.len);
                 const out_val: f32 = sum / n_channels_f;
 
-                out_split_slice.first[i_sample] = out_val;
+                out_channel[i_sample] = out_val;
             }
 
             self.out_result.metadata = prev_result.metadata;
@@ -360,8 +350,8 @@ test "BufferedStep chain" {
             self: *@This(),
             prev_result: *const Result,
         ) *const Result {
-            const in_slice = prev_result.segment.channel_pcm_buf[0].first;
-            const out_slice = self.out_segment.channel_pcm_buf[0].first;
+            const in_slice = prev_result.segment.channel_pcm_buf[0];
+            const out_slice = self.out_segment.channel_pcm_buf[0];
 
             for (0..out_slice.len) |i| {
                 out_slice[i] = in_slice[i * self.downsample_rate];
@@ -418,8 +408,8 @@ test "BufferedStep chain" {
                 @panic("Doubler received invalid number of channels");
             }
 
-            const in_slice = prev_result.segment.channel_pcm_buf[0].first;
-            const out_slice = self.out_segment.channel_pcm_buf[0].first;
+            const in_slice = prev_result.segment.channel_pcm_buf[0];
+            const out_slice = self.out_segment.channel_pcm_buf[0];
 
             const pipeline_out_samples_slice = self.pipeline_out_samples.addManyAsSlice(out_slice.len) catch {
                 @panic("Failed to write samples to final pipeline output");
@@ -531,8 +521,8 @@ test "BufferedStep chain" {
 
     var in_segment = try Segment.initWithCapacity(allocator, 2, 8);
     defer in_segment.deinit();
-    const in_left = in_segment.channel_pcm_buf[0].first;
-    const in_right = in_segment.channel_pcm_buf[1].first;
+    const in_left = in_segment.channel_pcm_buf[0];
+    const in_right = in_segment.channel_pcm_buf[1];
 
     @memcpy(in_left, @as([]const f32, &.{ 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7 }));
     @memcpy(in_right, @as([]const f32, &.{ 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9 }));
@@ -547,7 +537,7 @@ test "BufferedStep chain" {
     // Run pipeline
 
     try downmixer_step.write(&input);
-    in_segment.index += in_segment.length;
+    in_segment.index += in_segment.length();
     try downmixer_step.write(&input);
 
     // Check results - pattern of samples is repeated twice because we wrote the same input twice

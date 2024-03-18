@@ -1,6 +1,5 @@
 const std = @import("std");
 const math = std.math;
-const SplitSlice = @import("structures/SplitSlice.zig").SplitSlice;
 
 /// Convert [0, 1] normalized values to dbFS
 pub fn normToDBFS(values: []f32) void {
@@ -11,14 +10,11 @@ pub fn normToDBFS(values: []f32) void {
     }
 }
 
-pub fn rmsVolume(samples: SplitSlice(f32)) f32 {
+pub fn rmsVolume(samples: []f32) f32 {
     var sum: f32 = 0.0;
-    for (samples.first) |sample| {
+    for (samples) |sample| {
         sum += sample * sample;
     }
-    for (samples.second) |sample| {
-        sum += sample * sample;
-    }
-    const mean = sum / @as(f32, @floatFromInt(samples.len()));
+    const mean = sum / @as(f32, @floatFromInt(samples.len));
     return math.sqrt(mean);
 }

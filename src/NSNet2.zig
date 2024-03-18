@@ -3,7 +3,6 @@
 const std = @import("std");
 const pow = std.math.pow;
 const Allocator = std.mem.Allocator;
-const SplitSlice = @import("./structures/SplitSlice.zig").SplitSlice;
 const FFT = @import("./FFT.zig");
 const window_fn = @import("audio_utils/window_fn.zig");
 const resample = @import("audio_utils/resample.zig");
@@ -158,13 +157,12 @@ pub fn getChunkSize(in_sample_rate: usize) usize {
     return chunk_size * resample.calcDownsampleRate(in_sample_rate, 16000);
 }
 
-pub fn denoise(self: *Self, samples: SplitSlice(f32), denoised_result: []f32) !void {
+pub fn denoise(self: *Self, in_samples: []const f32, denoised_result: []f32) !void {
     const downsample_rate = resample.calcDownsampleRate(self.in_sample_rate, 16000);
     const n_frames = calcNFrames(chunk_size);
     const n_bins = calcNBins();
 
-    const in_len = samples.first.len + samples.second.len;
-    if (in_len != chunk_size * downsample_rate) {
+    if (in_samples.len != chunk_size * downsample_rate) {
         return error.InvalidInputLength;
     }
 
@@ -203,7 +201,7 @@ pub fn denoise(self: *Self, samples: SplitSlice(f32), denoised_result: []f32) !v
     std.mem.copyBackwards(f32, features_copy_dst, features_copy_src);
 
     resample.downsampleAudio(
-        samples,
+        in_samples,
         in_read_slice,
         downsample_rate,
     );
@@ -254,12 +252,8 @@ pub fn calcSpectrogram(
         const out_end_idx = out_start_idx + n_bins;
         const output_bins = result_specgram[out_start_idx..out_end_idx];
 
-        const in_slice = SplitSlice(f32){
-            .first = @constCast(input_frame),
-        };
-
         // Applies the window function, computes the FFT, and stores complex results in output_bins
-        try fft.fft(in_slice, window, output_bins);
+        try fft.fft(input_frame, window, output_bins);
     }
 }
 

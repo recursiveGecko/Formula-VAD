@@ -60,9 +60,22 @@ pub fn push(self: *Self, values: anytype, weight_any: anytype) void {
 }
 
 fn getValueOrNull(comptime T: type, obj: anytype, comptime field: []const u8) ?T {
-    const T_obj = @TypeOf(obj);
-    if (!@hasField(T_obj, field)) return null;
-    return @field(obj, field);
+    const T_info = @typeInfo(T);
+
+    const TNonOptional = if (T_info == .Optional) T_info.Optional.child else T;
+
+    const TObj = @TypeOf(obj);
+    if (!@hasField(TObj, field)) return null;
+
+    const maybe_val: ?TNonOptional = @field(obj, field);
+    if (maybe_val == null) return null;
+
+    const val: TNonOptional = maybe_val.?;
+    if (@typeInfo(TNonOptional) == .Float and !std.math.isFinite(val)) {
+        return null;
+    }
+
+    return val;
 }
 
 const t = std.testing;

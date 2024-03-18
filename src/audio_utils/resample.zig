@@ -1,5 +1,4 @@
 const std = @import("std");
-const SplitSlice = @import("../structures/SplitSlice.zig").SplitSlice;
 
 pub fn calcDownsampleRate(in_sample_rate: usize, base_rate: usize) usize {
     if (in_sample_rate % base_rate != 0) @panic("Invalid sample rate - must be divisible by base_rate");
@@ -7,24 +6,19 @@ pub fn calcDownsampleRate(in_sample_rate: usize, base_rate: usize) usize {
 }
 
 pub fn downsampleAudio(
-    input_samples: SplitSlice(f32),
+    input_samples: []const f32,
     output_samples: []f32,
     downsample_rate: usize,
 ) void {
-    if (input_samples.len() != output_samples.len * downsample_rate) {
+    if (input_samples.len != output_samples.len * downsample_rate) {
         @panic("Invalid downsampling inputs");
     }
 
-    const n_steps = input_samples.len() / downsample_rate;
+    const n_steps = input_samples.len / downsample_rate;
 
     for (0..n_steps) |i| {
         const src_idx = i * downsample_rate;
-
-        if (src_idx < input_samples.first.len) {
-            output_samples[i] = input_samples.first[src_idx];
-        } else if (src_idx >= input_samples.first.len) {
-            output_samples[i] = input_samples.second[src_idx - input_samples.first.len];
-        }
+        output_samples[i] = input_samples[src_idx];
     }
 }
 

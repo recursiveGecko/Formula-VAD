@@ -77,8 +77,8 @@ pub fn write(
     input: *const BufferedStep.Result,
     input_offset: usize,
 ) !Result {
-    const n_written = try self.buffer.write(input.segment, input_offset, null);
-    const n_remaining_input = input.segment.length - input_offset - n_written;
+    const n_written = try self.buffer.write(input.segment, input_offset);
+    const n_remaining_input = input.segment.length() - input_offset - n_written;
 
     self.vad_metadata.push(
         input.metadata,
@@ -100,12 +100,12 @@ pub fn write(
     }
 
     var result_segment: *Segment = &self.temp_result_segment;
-    result_segment.index = self.buffer.segment.index;
+    result_segment.index = self.buffer.segment_view.index;
 
     for (0..self.n_channels) |i| {
         try self.denoisers[i].denoise(
-            self.buffer.segment.channel_pcm_buf[i],
-            result_segment.channel_pcm_buf[i].first,
+            self.buffer.segment_view.channel_pcm_buf[i],
+            result_segment.channel_pcm_buf[i],
         );
     }
 
