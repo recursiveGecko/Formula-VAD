@@ -136,7 +136,10 @@ pub fn process(self: *Self, prev_result: *const BufferedStep.Result) *const Buff
             // we divided by zero, meaning the quieter channel is completely silent
             self.best_channel = louder_chan_index;
         } else if (avg_ratio > 1 + switch_best_threshold and self.best_channel != quieter_chan_index) {
-            log.debug("BufferedMixer switching to channel {d} at sample {d}", .{ quieter_chan_index, in_segment.index });
+            log.debug(
+                "BufferedMixer '{s}': switching to channel {d} at sample {d}",
+                .{ self.step.name, quieter_chan_index, in_segment.index },
+            );
             self.best_channel = quieter_chan_index;
         }
 

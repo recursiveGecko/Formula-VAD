@@ -41,10 +41,10 @@ n_channels: usize,
 /// Number of samples VAD has read from the pipeline
 pipeline_read_count: u64 = 0,
 buffered_volume_analyzer: BufferedVolumeAnalyzer,
-buffered_denoiser: BufferedDenoiser,
 buffered_fft: BufferedFFT,
 // new buffered steps
 buffered_mixer: *BufferedMixer,
+buffered_denoiser: *BufferedDenoiser,
 // Speech state machine
 vad_machine: VADMachine,
 alt_vad_machines: ?[]VADMachine,
@@ -62,14 +62,6 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     var buffered_volume_analyzer = try BufferedVolumeAnalyzer.init(allocator);
     errdefer buffered_volume_analyzer.deinit();
 
-    var buffered_denoiser = try BufferedDenoiser.init(
-        allocator,
-        n_channels,
-        sample_rate,
-        config.denoiser_model_path,
-    );
-    errdefer buffered_denoiser.deinit();
-
     var buffered_fft = try BufferedFFT.init(allocator, .{
         .n_channels = n_channels,
         .fft_size = config.fft_size,
@@ -78,8 +70,21 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     });
     errdefer buffered_fft.deinit();
 
-    const buffered_mixer = try BufferedMixer.init(allocator, "mixer", 48000, 2, false);
+    const buffered_mixer = try BufferedMixer.init(allocator, "mixer", 48000, 2, true);
     errdefer buffered_mixer.deinit();
+
+    var buffered_denoiser = try BufferedDenoiser.init(
+        allocator,
+        "nsnet2",
+        config.denoiser_model_path,
+        n_channels,
+        sample_rate,
+        false,
+    );
+    errdefer buffered_denoiser.deinit();
+
+    // Wire the steps
+    try buffered_mixer.step.connectTo(buffered_denoiser.step);
 
     var self = Self{
         .allocator = allocator,
@@ -129,7 +134,6 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn run(self: *Self) !void {
-    // try self.collectInputStep();
     const from = self.pipeline_read_count;
     const to = self.pipeline.totalWriteCount();
     self.pipeline_read_count = to;
@@ -141,65 +145,6 @@ pub fn run(self: *Self) !void {
     try self.buffered_mixer.step.write(&split_buffered_steps.first);
     try self.buffered_mixer.step.write(&split_buffered_steps.second);
 }
-
-// fn collectInputStep(self: *Self) !void {
-//     const frame_size = self.buffered_denoiser.getChunkSize();
-//     const p = self.pipeline;
-
-//     while (p.totalWriteCount() - self.pipeline_read_count >= frame_size) {
-//         const from = self.pipeline_read_count;
-//         const to = from + frame_size;
-//         self.pipeline_read_count = to;
-
-//         const split_slice = try self.pipeline.sliceSegment(from, to);
-
-//         const split_input_1 = BufferedStep.Result{
-//             .segment = &Segment{
-//                 .index = split_slice.first_index,
-//                 .channel_pcm_buf = split_slice.first,
-//             },
-//             .metadata = .{},
-//         };
-//         const split_input_2 = BufferedStep.Result{
-//             .segment = &Segment{
-//                 .index = split_slice.second_index,
-//                 .channel_pcm_buf = split_slice.second,
-//             },
-//             .metadata = .{},
-//         };
-
-//         // std.debug.print("collectInput: {d}, {d}\n", .{ split_input_1.segment.length(), split_input_2.segment.length() });
-
-//         const result_1 = self.buffered_volume_analyzer.write(&split_input_1);
-//         const result_2 = self.buffered_volume_analyzer.write(&split_input_2);
-
-//         try self.denoiserStep(&result_1);
-//         try self.denoiserStep(&result_2);
-//     }
-// }
-
-// fn denoiserStep(
-//     self: *Self,
-//     input: *const BufferedStep.Result,
-// ) !void {
-//     var input_offset: usize = 0;
-//     while (true) {
-//         const denoised_result = try self.buffered_denoiser.write(input, input_offset);
-
-//         if (denoised_result.denoised_segment == null) return;
-
-//         const fft_input = BufferedStep.Result{
-//             .segment = denoised_result.denoised_segment.?,
-//             .metadata = denoised_result.metadata.?,
-//         };
-//         _ = fft_input; // autofix
-
-//         // try self.fftStep(&fft_input);
-
-//         if (denoised_result.n_remaining_input == 0) return;
-//         input_offset = input.segment.length() - denoised_result.n_remaining_input;
-//     }
-// }
 
 // fn fftStep(
 //     self: *Self,

@@ -155,13 +155,13 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
         if (self.buffer_writer.isFull()) {
             // Result of this buffering step
             const buffer_metadata = self.buffer_metadata.toResult();
-            const this_result = Result{
+            const processor_input = Result{
                 .metadata = buffer_metadata,
                 .segment = &self.buffer_writer.segment_view,
             };
 
             // Process the input buffer
-            const processor_result = self.processor.call(&this_result);
+            const processor_result = self.processor.call(&processor_input);
 
             // Extra sanity checks in debug mode to ensure buffered steps are handling data correctly
             if (builtin.mode == .Debug) {
@@ -172,6 +172,16 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
                     std.debug.panic(
                         "BufferedStep processor '{s}' didn't increment the segment index of its output. Last seen index: {d}",
                         .{ self.name, self.last_out_index.? },
+                    );
+                }
+
+                const empty_metadata = VADMetadata.Result{};
+                const had_metadata = !std.meta.eql(buffer_metadata, empty_metadata);
+                const has_metadata = !std.meta.eql(processor_result.metadata, empty_metadata);
+                if (had_metadata and !has_metadata) {
+                    std.debug.panic(
+                        "BufferedStep processor '{s}' dropped all metadata at index {d}.",
+                        .{ self.name, processor_input.segment.index },
                     );
                 }
 

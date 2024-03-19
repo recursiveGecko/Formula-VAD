@@ -8,113 +8,85 @@ const BufferedStep = @import("./BufferedStep.zig");
 const NSNet2 = @import("../NSNet2.zig");
 
 const Self = @This();
-pub const Result = struct {
-    input_segment: *const Segment,
-    denoised_segment: ?*const Segment,
-    n_remaining_input: usize,
-    metadata: ?VADMetadata.Result,
-};
 
 allocator: Allocator,
-n_channels: usize,
 sample_rate: usize,
-denoisers: []NSNet2,
-buffer: SegmentWriter,
-vad_metadata: VADMetadata = .{},
-temp_result_segment: Segment,
+denoiser: NSNet2,
+out_segment: Segment,
+out_result: BufferedStep.Result,
+audio_config: BufferedStep.AudioConfig,
+step: *BufferedStep,
 
 pub fn init(
     allocator: Allocator,
-    n_channels: usize,
-    sample_rate: usize,
+    name: []const u8,
     model_path: ?[:0]const u8,
-) !Self {
-    const temp_result_segment = try Segment.initWithCapacity(
+    sample_rate: usize,
+    expect_output: bool,
+) !*Self {
+    var self = try allocator.create(Self);
+    errdefer allocator.destroy(self);
+
+    var out_segment = try Segment.initWithCapacity(
         allocator,
-        n_channels,
-        getChunkSizeForSR(sample_rate),
+        1,
+        NSNet2.getChunkSize(sample_rate),
     );
+    errdefer out_segment.deinit();
 
-    var denoisers = try allocator.alloc(NSNet2, n_channels);
-    for (0..n_channels) |i| {
-        denoisers[i] = try NSNet2.init(allocator, sample_rate, model_path);
-    }
-    errdefer {
-        for (0..n_channels) |i| denoisers[i].deinit();
-        allocator.free(denoisers);
-    }
+    var denoiser = try NSNet2.init(allocator, sample_rate, model_path);
+    errdefer denoiser.deinit();
 
-    var buffer = try SegmentWriter.init(allocator, n_channels, getChunkSizeForSR(sample_rate));
-    errdefer buffer.deinit();
-
-    return Self{
+    self.* = .{
         .allocator = allocator,
-        .n_channels = n_channels,
         .sample_rate = sample_rate,
-        .denoisers = denoisers,
-        .temp_result_segment = temp_result_segment,
-        .buffer = buffer,
+        .denoiser = denoiser,
+        .out_segment = out_segment,
+        .out_result = .{
+            .metadata = .{},
+            .segment = &self.out_segment,
+        },
+        .audio_config = .{
+            .buffer_size = NSNet2.getChunkSize(sample_rate),
+            .in_channels = 1,
+            .in_sample_rate = 48_000,
+            .out_channels = 1,
+            .out_sample_rate = 48_000,
+            .expect_output = expect_output,
+        },
+        .step = undefined,
     };
+
+    self.step = try BufferedStep.init(
+        allocator,
+        name,
+        self.audio_config,
+        BufferedStep.Processor.forContext(self),
+    );
+    errdefer self.step.deinit();
+
+    return self;
 }
 
 pub fn deinit(self: *Self) void {
-    for (self.denoisers) |*d| d.deinit();
-    self.allocator.free(self.denoisers);
-    self.temp_result_segment.deinit();
-    self.buffer.deinit();
+    self.denoiser.deinit();
+    self.out_segment.deinit();
+    self.step.deinit();
+    self.allocator.destroy(self);
 }
 
-pub fn getChunkSize(self: *Self) usize {
-    return getChunkSizeForSR(self.sample_rate);
-}
-
-pub fn getChunkSizeForSR(sample_rate: usize) usize {
-    return NSNet2.getChunkSize(sample_rate);
-}
-
-pub fn write(
+pub fn process(
     self: *Self,
     input: *const BufferedStep.Result,
-    input_offset: usize,
-) !Result {
-    const n_written = try self.buffer.write(input.segment, input_offset);
-    const n_remaining_input = input.segment.length() - input_offset - n_written;
+) *const BufferedStep.Result {
+    const in_pcm = input.segment.channel_pcm_buf[0];
+    const out_pcm = self.out_segment.writablePCM()[0];
 
-    self.vad_metadata.push(
-        input.metadata,
-        n_written,
-    );
-
-    if (!self.buffer.isFull()) {
-        return Result{
-            .input_segment = input.segment,
-            .n_remaining_input = n_remaining_input,
-            .denoised_segment = null,
-            .metadata = null,
-        };
-    }
-
-    defer {
-        self.buffer.reset(input.segment.index + n_written);
-        self.vad_metadata = .{};
-    }
-
-    var result_segment: *Segment = &self.temp_result_segment;
-    result_segment.index = self.buffer.segment_view.index;
-
-    for (0..self.n_channels) |i| {
-        try self.denoisers[i].denoise(
-            self.buffer.segment_view.channel_pcm_buf[i],
-            result_segment.channel_pcm_buf[i],
-        );
-    }
-
-    const result = Result{
-        .input_segment = input.segment,
-        .denoised_segment = result_segment,
-        .metadata = self.vad_metadata.toResult(),
-        .n_remaining_input = n_remaining_input,
+    self.denoiser.denoise(in_pcm, out_pcm) catch |err| {
+        std.debug.panic("BufferedDenoiser '{s}': denoising failed: {any}", .{ self.step.name, err });
     };
 
-    return result;
+    self.out_segment.index = input.segment.index;
+    self.out_result.metadata = input.metadata;
+    return &self.out_result;
 }
