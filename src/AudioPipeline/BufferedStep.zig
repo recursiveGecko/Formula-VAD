@@ -168,6 +168,7 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
                 const last_out = self.last_out_index;
                 const this_out = processor_result.segment.index;
 
+                // Correct handling of Segment indices
                 if (last_out != null and last_out.? == this_out) {
                     std.debug.panic(
                         "BufferedStep processor '{s}' didn't increment the segment index of its output. Last seen index: {d}",
@@ -175,6 +176,7 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
                     );
                 }
 
+                // Correct handling of metadata
                 const empty_metadata = VADMetadata.Result{};
                 const had_metadata = !std.meta.eql(buffer_metadata, empty_metadata);
                 const has_metadata = !std.meta.eql(processor_result.metadata, empty_metadata);
@@ -182,6 +184,14 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
                     std.debug.panic(
                         "BufferedStep processor '{s}' dropped all metadata at index {d}.",
                         .{ self.name, processor_input.segment.index },
+                    );
+                }
+
+                // Correct number of channels
+                if (processor_result.segment.nChannels() != self.audio_config.out_channels) {
+                    std.debug.panic(
+                        "BufferedStep processor '{s}' returned an invalid number of channels. Expected: {d}, Received: {d}.",
+                        .{ self.name, self.audio_config.out_channels, processor_result.segment.nChannels() },
                     );
                 }
 
