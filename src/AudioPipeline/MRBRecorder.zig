@@ -140,10 +140,12 @@ fn maybeRecordBuffer(self: *Self, suggested_to_idx: usize) !void {
     const first_segment = Segment{
         .index = split_slice.first_index,
         .channel_pcm_buf = split_slice.first,
+        .mem_ownership = .nothing,
     };
     const second_segment = Segment{
         .index = split_slice.second_index,
         .channel_pcm_buf = split_slice.second,
+        .mem_ownership = .nothing,
     };
     try self.recorder.write(&first_segment);
     try self.recorder.write(&second_segment);

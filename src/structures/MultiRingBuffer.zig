@@ -16,10 +16,10 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
         pub const SplitSlice = struct {
             /// sample index of the first sample in `first` slice
             first_index: TCounter = 0,
-            first: [][]TData,
+            first: []const []const TData,
             /// sample index of the first sample in `second` slice
             second_index: TCounter = 0,
-            second: [][]TData,
+            second: []const []const TData,
 
             pub fn firstLength(self: *const @This()) TCounter {
                 return self.first[0].len;
@@ -186,7 +186,7 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
             self: *Self,
             abs_from: TCounter,
             abs_to: TCounter,
-        ) !*const SplitSlice {
+        ) !SplitSlice {
             // Valid slicing range
             const max_abs_idx = self.total_write_count;
             const min_abs_idx = max_abs_idx - @min(self.capacity, max_abs_idx);
@@ -213,7 +213,9 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
 
             // std.debug.print("abs: [{d:10}, {d:10} )   rel: [{d:10} .. +{d:8} )\n", .{ abs_from, abs_to, rel_start, n_to_end });
 
-            var split_slice = &self.temp_split_slice;
+            var split_slice = self.temp_split_slice;
+            const sliceable_first = @constCast(split_slice.first);
+            const sliceable_second = @constCast(split_slice.second);
 
             split_slice.first_index = abs_from;
             split_slice.second_index = abs_from + n_to_end;
@@ -221,11 +223,11 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
             for (0..self.n_channels) |channel_idx| {
                 const src_channel = self.channel_buffers[channel_idx];
 
-                split_slice.first[channel_idx] = src_channel[rel_start .. rel_start + n_to_end];
-                split_slice.second[channel_idx] = src_channel[0 .. total_length - n_to_end];
+                sliceable_first[channel_idx] = src_channel[rel_start .. rel_start + n_to_end];
+                sliceable_second[channel_idx] = src_channel[0 .. total_length - n_to_end];
             }
 
-            return &self.temp_split_slice;
+            return split_slice;
         }
     };
 }

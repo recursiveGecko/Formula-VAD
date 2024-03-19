@@ -23,26 +23,20 @@ pub fn init(
     var internal_segment = try Segment.initWithCapacity(allocator, n_channels, length);
     errdefer internal_segment.deinit();
 
-    const read_only_channels = try allocator.alloc([]f32, n_channels);
-    errdefer allocator.free(read_only_channels);
-
-    const read_only_segment = Segment{
-        .index = 0,
-        .channel_pcm_buf = read_only_channels,
-        .is_view = true,
-    };
+    var segment_view = try Segment.initWithChannels(allocator, n_channels);
+    errdefer segment_view.deinit();
 
     const self = Self{
         .allocator = allocator,
         .internal_segment = internal_segment,
-        .segment_view = read_only_segment,
+        .segment_view = segment_view,
     };
 
     return self;
 }
 
 pub fn deinit(self: *Self) void {
-    self.allocator.free(self.segment_view.channel_pcm_buf);
+    self.segment_view.deinit();
     self.internal_segment.deinit();
 }
 
@@ -55,7 +49,7 @@ pub fn isFull(self: *Self) bool {
 /// the buffer is full and the buffer segment should be used in some way before
 /// calling .reset(), followed by a second .write() with the offset returned from this call.
 pub fn write(self: *Self, source: *const Segment, read_offset: usize) !usize {
-    const segment = self.internal_segment;
+    var segment = self.internal_segment;
 
     // Determine the capacity of the internal buffer
     const capacity = segment.length();
@@ -80,7 +74,7 @@ pub fn write(self: *Self, source: *const Segment, read_offset: usize) !usize {
 
     for (0..n_channels) |chan_idx| {
         // slices of each channel
-        var dst_chan = segment.channel_pcm_buf[chan_idx];
+        var dst_chan = segment.writablePCM()[chan_idx];
         var src_chan = source.channel_pcm_buf[chan_idx];
 
         @memcpy(
@@ -111,7 +105,7 @@ fn updateReadOnlyView(self: *Self) void {
 
     for (0..self.internal_segment.nChannels()) |i| {
         const src_channel = self.internal_segment.channel_pcm_buf[i];
-        self.segment_view.channel_pcm_buf[i] = src_channel[0..self.write_index];
+        self.segment_view.sliceablePCM()[i] = src_channel[0..self.write_index];
     }
 }
 
@@ -119,55 +113,49 @@ fn updateReadOnlyView(self: *Self) void {
 // Tests
 //
 
-const expect = std.testing.expect;
-const expectEqual = std.testing.expectEqual;
-const expectEqualSlices = std.testing.expectEqualSlices;
-const expectError = std.testing.expectError;
-const test_allocator = std.testing.allocator;
-
 test "SegmentWriter" {
-    var segment_writer = try init(test_allocator, 1, 10);
+    const t = std.testing;
+
+    var segment_writer = try init(t.allocator, 1, 10);
     defer segment_writer.deinit();
 
-    const samples: []const f32 = &.{ 1, 2, 3, 4 };
-    const segment_channels: []const []f32 = &.{@constCast(samples)};
-    const segment = Segment{
-        .index = 0,
-        .allocator = null,
-        .channel_pcm_buf = @constCast(segment_channels),
-    };
+    var segment = try Segment.initWithCapacity(t.allocator, 1, 4);
+    defer segment.deinit();
+
+    @memcpy(segment.writablePCM()[0], &[_]f32{ 1, 2, 3, 4 });
+
     var written: usize = undefined;
 
     // Write all 4 samples of the pattern
     written = try segment_writer.write(&segment, 0);
-    try expectEqual(written, 4);
+    try t.expectEqual(written, 4);
 
     // Write last 2 samples of the pattern
     written = try segment_writer.write(&segment, 2);
-    try expectEqual(written, 2);
+    try t.expectEqual(written, 2);
 
     // Write last 3 samples of the pattern
     written = try segment_writer.write(&segment, 1);
-    try expectEqual(written, 3);
+    try t.expectEqual(written, 3);
 
     // Ensure we're at correct position
-    try expectEqual(segment_writer.write_index, 9);
+    try t.expectEqual(segment_writer.write_index, 9);
 
     // Try to write the last 2 samples of the pattern,
     // but only 1 should be written
     written = try segment_writer.write(&segment, 2);
-    try expectEqual(written, 1);
+    try t.expectEqual(written, 1);
 
     // 0 Samples should be written when the buffer is full
-    try expectEqual(segment_writer.write(&segment, 3), 0);
+    try t.expectEqual(segment_writer.write(&segment, 3), 0);
 
     const expected: []const f32 = &.{ 1, 2, 3, 4, 3, 4, 2, 3, 4, 3 };
 
     // Check that the samples are correct
-    try std.testing.expectEqualSlices(f32, expected, segment_writer.internal_segment.channel_pcm_buf[0]);
+    try t.expectEqualSlices(f32, expected, segment_writer.internal_segment.channel_pcm_buf[0]);
 
     // Check that the reset works
     segment_writer.reset(5);
-    try expectEqual(segment_writer.write_index, 0);
-    try expectEqual(segment_writer.internal_segment.index, 5);
+    try t.expectEqual(segment_writer.write_index, 0);
+    try t.expectEqual(segment_writer.internal_segment.index, 5);
 }

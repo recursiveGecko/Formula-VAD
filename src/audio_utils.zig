@@ -10,7 +10,7 @@ pub fn normToDBFS(values: []f32) void {
     }
 }
 
-pub fn rmsVolume(samples: []f32) f32 {
+pub fn rmsVolume(samples: []const f32) f32 {
     var sum: f32 = 0.0;
     for (samples) |sample| {
         sum += sample * sample;

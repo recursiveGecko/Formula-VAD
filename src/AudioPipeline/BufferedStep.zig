@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Segment = @import("./Segment.zig");
 const VADMetadata = @import("./VADMetadata.zig");
 const SegmentWriter = @import("./SegmentWriter.zig");
@@ -64,7 +65,7 @@ pub const Processor = struct {
         };
     }
 
-    pub fn call(
+    pub inline fn call(
         self: *const Processor,
         result: *const Result,
     ) *const Result {
@@ -88,14 +89,15 @@ name: []const u8,
 allocator: std.mem.Allocator,
 buffer_writer: SegmentWriter,
 buffer_metadata: VADMetadata = .{},
+last_out_index: if (builtin.mode == .Debug) ?u64 else ?void = null,
 audio_config: AudioConfig,
 processor: Processor,
 prev: ?*Self = null,
 next: ?*Self = null,
 
 pub fn init(
-    comptime name: []const u8,
     allocator: std.mem.Allocator,
+    name: []const u8,
     audio_config: AudioConfig,
     processor: Processor,
 ) !*Self {
@@ -133,15 +135,18 @@ pub fn deinit(self: *Self) void {
 ///
 /// *Caller owns the memory associated with `prev_result` passed to this function!*
 ///
-/// It's imperative the the caller tracks the sample index container in `Segment.index` correctly.
+/// It's imperative the the caller tracks the sample index contained in `Segment.index` correctly.
 /// `prev_result.segment.index` should increase by previous `prev_result.segment.length` between calls
 pub fn write(self: *Self, prev_result: *const Result) !void {
     if (self.next == null and self.audio_config.expect_output) {
         std.debug.panic("BufferedStep '{s}' doesn't have an expected output connected", .{self.name});
     }
 
+    if (prev_result.segment.length() == 0) return;
+
     var total_written: usize = 0;
     while (true) {
+        // TODO: We could bypass the buffer when input exactly matches the required size and our buffer is otherwise empty
         const n_written = try self.buffer_writer.write(prev_result.segment, total_written);
         total_written += n_written;
 
@@ -155,10 +160,25 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
                 .segment = &self.buffer_writer.segment_view,
             };
 
-            // std.debug.print("- Buffer for {s:15}   sample index before calling processor: {d}\n", .{ self.name, this_result.segment.index });
-
-            // Run processor and forward result to next step
+            // Process the input buffer
             const processor_result = self.processor.call(&this_result);
+
+            // Extra sanity checks in debug mode to ensure buffered steps are handling data correctly
+            if (builtin.mode == .Debug) {
+                const last_out = self.last_out_index;
+                const this_out = processor_result.segment.index;
+
+                if (last_out != null and last_out.? == this_out) {
+                    std.debug.panic(
+                        "BufferedStep processor '{s}' didn't increment the segment index of its output. Last seen index: {d}",
+                        .{ self.name, self.last_out_index.? },
+                    );
+                }
+
+                self.last_out_index = processor_result.segment.index;
+            }
+
+            // Pass processed output to the next step
             if (self.next) |next| {
                 try next.write(processor_result);
             }
@@ -167,8 +187,6 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
             const next_sample_index = prev_result.segment.index + total_written;
             self.buffer_writer.reset(next_sample_index);
             self.buffer_metadata = .{};
-
-            // std.debug.print("+ Buffer for {s:15}    sample index after calling processor: {d}\n", .{ self.name, self.buffer_writer.segment.index });
         }
 
         if (total_written == prev_result.segment.length()) {
@@ -179,6 +197,8 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
                 "BufferedStep '{s}' wrote more samples ({d}) than the input ({d})",
                 .{ self.name, total_written, prev_result.segment.length() },
             );
+        } else {
+            // left empty, we haven't written our full input to the buffer yet
         }
     }
 }
@@ -248,13 +268,6 @@ pub fn connectTo(self: *Self, other: *Self) !void {
 test "BufferedStep chain" {
     const allocator = std.testing.allocator;
 
-    // contains output samples
-    var output_samples = std.ArrayList(f32).init(allocator);
-    // contains sample indices associated with output samples
-    var output_indices = std.ArrayList(usize).init(allocator);
-    defer output_samples.deinit();
-    defer output_indices.deinit();
-
     //
     // Downmixer, downmixes with simple average of 2 channels
     //
@@ -262,17 +275,22 @@ test "BufferedStep chain" {
         allocator: std.mem.Allocator,
         out_segment: Segment,
         out_result: Result,
-        // counts number of samples emitted in previous invocation
+        test_samples: std.ArrayList(f32),
+        test_indices: std.ArrayList(usize),
 
         pub fn init(alloc: std.mem.Allocator) !*@This() {
             var self = try alloc.create(@This());
 
-            self.allocator = alloc;
-            // Number of channels and length (buffer size) must match BufferedStep definition below
-            self.out_segment = try Segment.initWithCapacity(alloc, 1, 2);
-            self.out_result = .{
-                .metadata = .{},
-                .segment = &self.out_segment,
+            self.* = .{
+                .allocator = alloc,
+                // Number of channels and length (buffer size) must match BufferedStep definition below
+                .out_segment = try Segment.initWithCapacity(alloc, 1, 2),
+                .out_result = .{
+                    .metadata = .{},
+                    .segment = &self.out_segment,
+                },
+                .test_samples = std.ArrayList(f32).init(allocator),
+                .test_indices = std.ArrayList(usize).init(allocator),
             };
 
             return self;
@@ -280,12 +298,16 @@ test "BufferedStep chain" {
 
         pub fn deinit(self: *@This()) void {
             self.out_segment.deinit();
+            self.test_samples.deinit();
+            self.test_indices.deinit();
             self.allocator.destroy(self);
         }
 
         pub fn process(self: *@This(), prev_result: *const Result) *const Result {
             const in_channels = prev_result.segment.channel_pcm_buf;
-            const out_channel = self.out_segment.channel_pcm_buf[0];
+            const out_channel = self.out_segment.writablePCM()[0];
+
+            const test_samples_slice = self.test_samples.addManyAsSlice(out_channel.len) catch @panic("nooo");
 
             for (0..prev_result.segment.length()) |i_sample| {
                 var sum: f32 = 0;
@@ -296,10 +318,16 @@ test "BufferedStep chain" {
                 const out_val: f32 = sum / n_channels_f;
 
                 out_channel[i_sample] = out_val;
+                // capture output for testing
+                test_samples_slice[i_sample] = out_channel[i_sample];
             }
 
             self.out_result.metadata = prev_result.metadata;
             self.out_segment.index = prev_result.segment.index;
+
+            // capture output for testing
+            const out_index = self.test_indices.addOne() catch @panic("nooo");
+            out_index.* = self.out_segment.index;
 
             return &self.out_result;
         }
@@ -314,7 +342,8 @@ test "BufferedStep chain" {
         out_segment: Segment,
         out_result: Result,
         downsample_rate: usize,
-        prev_out: usize = 0,
+        test_samples: std.ArrayList(f32),
+        test_indices: std.ArrayList(usize),
 
         pub fn init(
             alloc: std.mem.Allocator,
@@ -327,22 +356,28 @@ test "BufferedStep chain" {
 
             var self = try alloc.create(@This());
 
-            self.allocator = alloc;
-            self.name = name;
-            // Number of channels and length (buffer size) must match BufferedStep definition below
-            // This is a resampler that skips every other sample, so `out_length` must be half of `in_length`
-            self.out_segment = try Segment.initWithCapacity(alloc, 1, out_buffer_size);
-            self.out_result = .{
-                .metadata = .{},
-                .segment = &self.out_segment,
+            self.* = .{
+                .allocator = alloc,
+                .name = name,
+                // Number of channels and length (buffer size) must match BufferedStep definition below
+                // This is a resampler that skips every other sample, so `out_length` must be half of `in_length`
+                .out_segment = try Segment.initWithCapacity(alloc, 1, out_buffer_size),
+                .out_result = .{
+                    .metadata = .{},
+                    .segment = &self.out_segment,
+                },
+                .test_samples = std.ArrayList(f32).init(allocator),
+                .test_indices = std.ArrayList(usize).init(allocator),
+                .downsample_rate = downsample_rate,
             };
-            self.downsample_rate = downsample_rate;
 
             return self;
         }
 
         pub fn deinit(self: *@This()) void {
             self.out_segment.deinit();
+            self.test_samples.deinit();
+            self.test_indices.deinit();
             self.allocator.destroy(self);
         }
 
@@ -351,15 +386,23 @@ test "BufferedStep chain" {
             prev_result: *const Result,
         ) *const Result {
             const in_slice = prev_result.segment.channel_pcm_buf[0];
-            const out_slice = self.out_segment.channel_pcm_buf[0];
+            const out_slice = self.out_segment.writablePCM()[0];
+
+            const test_samples_slice = self.test_samples.addManyAsSlice(out_slice.len) catch @panic("nooo");
 
             for (0..out_slice.len) |i| {
                 out_slice[i] = in_slice[i * self.downsample_rate];
+                // capture output for testing
+                test_samples_slice[i] = out_slice[i];
             }
             self.out_result.metadata = prev_result.metadata;
             self.out_segment.index = std.math.divExact(usize, @intCast(prev_result.segment.index), self.downsample_rate) catch {
                 @panic("impossible (checked in init)");
             };
+
+            // capture output for testing
+            const out_index = self.test_indices.addOne() catch @panic("nooo");
+            out_index.* = self.out_segment.index;
 
             return &self.out_result;
         }
@@ -372,31 +415,33 @@ test "BufferedStep chain" {
         allocator: std.mem.Allocator,
         out_segment: Segment,
         out_result: Result,
-        pipeline_out_samples: *std.ArrayList(f32),
-        pipeline_out_indices: *std.ArrayList(usize),
+        test_samples: std.ArrayList(f32),
+        test_indices: std.ArrayList(usize),
 
         pub fn init(
             alloc: std.mem.Allocator,
-            out_samples: *std.ArrayList(f32),
-            out_indices: *std.ArrayList(usize),
         ) !*@This() {
             var self = try alloc.create(@This());
 
-            self.allocator = alloc;
-            // Number of channels and length (buffer size) must match BufferedStep definition below
-            self.out_segment = try Segment.initWithCapacity(alloc, 1, 1);
-            self.out_result = .{
-                .metadata = .{},
-                .segment = &self.out_segment,
+            self.* = .{
+                .allocator = alloc,
+                // Number of channels and length (buffer size) must match BufferedStep definition below
+                .out_segment = try Segment.initWithCapacity(alloc, 1, 1),
+                .out_result = .{
+                    .metadata = .{},
+                    .segment = &self.out_segment,
+                },
+                .test_samples = std.ArrayList(f32).init(allocator),
+                .test_indices = std.ArrayList(usize).init(allocator),
             };
-            self.pipeline_out_samples = out_samples;
-            self.pipeline_out_indices = out_indices;
 
             return self;
         }
 
         pub fn deinit(self: *@This()) void {
             self.out_segment.deinit();
+            self.test_samples.deinit();
+            self.test_indices.deinit();
             self.allocator.destroy(self);
         }
 
@@ -409,20 +454,21 @@ test "BufferedStep chain" {
             }
 
             const in_slice = prev_result.segment.channel_pcm_buf[0];
-            const out_slice = self.out_segment.channel_pcm_buf[0];
+            const out_slice = self.out_segment.writablePCM()[0];
 
-            const pipeline_out_samples_slice = self.pipeline_out_samples.addManyAsSlice(out_slice.len) catch {
-                @panic("Failed to write samples to final pipeline output");
-            };
+            // capture output for testing
+            const test_samples_slice = self.test_samples.addManyAsSlice(out_slice.len) catch @panic("nooo");
 
             for (0..in_slice.len) |i| {
                 out_slice[i] = in_slice[i] * 2;
-                pipeline_out_samples_slice[i] = out_slice[i];
+                // capture output for testing
+                test_samples_slice[i] = out_slice[i];
             }
             self.out_result.metadata = prev_result.metadata;
             self.out_segment.index = prev_result.segment.index;
 
-            const out_index = self.pipeline_out_indices.addOne() catch @panic("Failed to write index to final pipeline output");
+            // capture output for testing
+            const out_index = self.test_indices.addOne() catch @panic("nooo");
             out_index.* = self.out_segment.index;
 
             return &self.out_result;
@@ -438,8 +484,8 @@ test "BufferedStep chain" {
     defer downmixer.deinit();
 
     const downmixer_step = try Self.init(
-        "downmixer",
         allocator,
+        "downmixer",
         .{
             .buffer_size = 2,
             .in_channels = 2,
@@ -457,8 +503,8 @@ test "BufferedStep chain" {
     defer resampler_1.deinit();
 
     const resampler_step_1 = try Self.init(
-        "resampler 1",
         allocator,
+        "resampler 1",
         .{
             .buffer_size = 2,
             .in_channels = 1,
@@ -476,8 +522,8 @@ test "BufferedStep chain" {
     defer resampler_2.deinit();
 
     const resampler_step_2 = try Self.init(
-        "resampler 2",
         allocator,
+        "resampler 2",
         .{
             .buffer_size = 4,
             .in_channels = 1,
@@ -491,12 +537,12 @@ test "BufferedStep chain" {
     defer resampler_step_2.deinit();
 
     // Doubler
-    var doubler = try Doubler.init(allocator, &output_samples, &output_indices);
+    var doubler = try Doubler.init(allocator);
     defer doubler.deinit();
 
     const doubler_step = try Self.init(
-        "doubler",
         allocator,
+        "doubler",
         .{
             .buffer_size = 1,
             .in_channels = 1,
@@ -521,11 +567,11 @@ test "BufferedStep chain" {
 
     var in_segment = try Segment.initWithCapacity(allocator, 2, 8);
     defer in_segment.deinit();
-    const in_left = in_segment.channel_pcm_buf[0];
-    const in_right = in_segment.channel_pcm_buf[1];
+    const in_left = in_segment.writablePCM()[0];
+    const in_right = in_segment.writablePCM()[1];
 
-    @memcpy(in_left, @as([]const f32, &.{ 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7 }));
-    @memcpy(in_right, @as([]const f32, &.{ 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9 }));
+    @memcpy(in_left, &[_]f32{ 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7 });
+    @memcpy(in_right, &[_]f32{ 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9 });
 
     const input = Result{
         .metadata = .{
@@ -549,19 +595,18 @@ test "BufferedStep chain" {
     //    -> 0.1, 0.5, ... (repeated)
     // 4. each sample is doubled
     //    -> 0.2, 1, ... (repeated)
-
     const expected_output_samples: []const f32 = &.{ 0.2, 1, 0.2, 1 };
     for (0..expected_output_samples.len) |i| {
-        try std.testing.expectApproxEqAbs(expected_output_samples[i], output_samples.items[i], 0.00001);
+        try std.testing.expectApproxEqAbs(expected_output_samples[i], doubler.test_samples.items[i], 0.00001);
     }
     // std.debug.print("{d}\n", .{output_samples.items});
 
     // indices at final step should be relative to its own input
     const expected_output_indices: []const usize = &.{ 0, 1, 2, 3 };
-    try std.testing.expectEqualSlices(usize, expected_output_indices, output_indices.items);
+    try std.testing.expectEqualSlices(usize, expected_output_indices, doubler.test_indices.items);
     // std.debug.print("{d}\n", .{output_indices.items});
 
-    // test sample rate multiplier at final step, we halved the sampling rate twice
+    // test sample rate multiplier at final step, we halved the sample rate twice
     try std.testing.expectApproxEqAbs(0.5 * 0.5, doubler_step.rootSampleRateMultiplier(), 0.000001);
     // std.debug.print("{d}\n", .{doubler_step.rootSampleRateMultiplier()});
 

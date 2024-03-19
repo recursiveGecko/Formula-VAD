@@ -22,14 +22,8 @@ const seconds_per_hour = 3600;
 pub const std_options: std.Options = .{
     .log_level = .warn,
     .log_scope_levels = &.{
-        .{
-            .scope = .vad_sm,
-            .level = .warn,
-        },
-        .{
-            .scope = .vad,
-            .level = .warn,
-        },
+        .{ .scope = .vad_sm, .level = .warn },
+        .{ .scope = .vad, .level = .warn },
     },
 };
 

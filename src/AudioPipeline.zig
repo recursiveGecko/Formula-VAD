@@ -4,9 +4,9 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const Segment = @import("./AudioPipeline/Segment.zig");
 const MRBRecorder = @import("./AudioPipeline/MRBRecorder.zig");
-const MultiRingBuffer = @import("./structures/MultiRingBuffer.zig").MultiRingBuffer;
-pub const VADPipeline = @import("./AudioPipeline/VADPipeline.zig");
-pub const AudioBuffer = @import("./audio_utils/AudioBuffer.zig");
+const AudioMRB = @import("./types.zig").AudioMRB;
+const VADPipeline = @import("./AudioPipeline/VADPipeline.zig");
+const AudioBuffer = @import("./audio_utils/AudioBuffer.zig");
 
 const Self = @This();
 
@@ -23,8 +23,6 @@ pub const Config = struct {
     skip_processing: bool = false,
 };
 
-pub const AudioMRB = MultiRingBuffer(f32, u64);
-
 allocator: Allocator,
 config: Config,
 ring_buffer: AudioMRB,
@@ -39,7 +37,7 @@ pub fn init(
 ) !*Self {
     const buffer_length = config.buffer_length orelse config.sample_rate * 5;
 
-    var ring_buffer = try MultiRingBuffer(f32, u64).init(
+    var ring_buffer = try AudioMRB.init(
         allocator,
         config.n_channels,
         buffer_length,
@@ -115,7 +113,7 @@ pub fn pushSamples(self: *Self, channel_pcm: []const []const f32) !u64 {
 }
 
 /// Slice samples using absolute indices, from `abs_from` inclusive to `abs_to` exclusive.
-pub fn sliceSegment(self: *Self, abs_from: u64, abs_to: u64) !*const AudioMRB.SplitSlice {
+pub fn readRingBuffer(self: *Self, abs_from: u64, abs_to: u64) !AudioMRB.SplitSlice {
     return try self.ring_buffer.sliceBuffer(
         abs_from,
         abs_to,

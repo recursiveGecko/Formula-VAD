@@ -94,7 +94,7 @@ pub fn finalize(self: *Self, to_frame: u64, keep: bool) !?AudioBuffer {
         }
 
         const n_to_keep = to_frame - self.startIndex();
-        const segment = self.segment_writer.segment_view;
+        var segment = self.segment_writer.segment_view;
         try segment.clipView(0, n_to_keep);
 
         const audio_buffer = try segmentToAudioBuffer(self.allocator, segment, self.sample_rate);

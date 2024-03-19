@@ -9,10 +9,12 @@ const Segment = @import("./Segment.zig");
 const SegmentWriter = @import("./SegmentWriter.zig");
 const VADMachine = @import("./VADMachine.zig");
 const VADMetadata = @import("./VADMetadata.zig");
+const BufferedStep = @import("./BufferedStep.zig");
 const BufferedVolumeAnalyzer = @import("./BufferedVolumeAnalyzer.zig");
 const BufferedDenoiser = @import("./BufferedDenoiser.zig");
-const BufferedStep = @import("./BufferedStep.zig");
+const BufferedMixer = @import("BufferedMixer.zig");
 const audio_utils = @import("../audio_utils.zig");
+const types = @import("../types.zig");
 
 const Self = @This();
 
@@ -41,6 +43,8 @@ pipeline_read_count: u64 = 0,
 buffered_volume_analyzer: BufferedVolumeAnalyzer,
 buffered_denoiser: BufferedDenoiser,
 buffered_fft: BufferedFFT,
+// new buffered steps
+buffered_mixer: *BufferedMixer,
 // Speech state machine
 vad_machine: VADMachine,
 alt_vad_machines: ?[]VADMachine,
@@ -74,12 +78,18 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !Self {
     });
     errdefer buffered_fft.deinit();
 
+    const buffered_mixer = try BufferedMixer.init(allocator, "mixer", 48000, 2, false);
+    errdefer buffered_mixer.deinit();
+
     var self = Self{
         .allocator = allocator,
         .pipeline = pipeline,
         .config = config,
         .n_channels = n_channels,
         .sample_rate = sample_rate,
+
+        .buffered_mixer = buffered_mixer,
+
         .buffered_volume_analyzer = buffered_volume_analyzer,
         .buffered_denoiser = buffered_denoiser,
         .buffered_fft = buffered_fft,
@@ -112,120 +122,132 @@ pub fn deinit(self: *Self) void {
         self.allocator.free(alt_vad);
     }
     self.vad_machine.deinit();
+    self.buffered_mixer.deinit();
     self.buffered_volume_analyzer.deinit();
     self.buffered_denoiser.deinit();
     self.buffered_fft.deinit();
 }
 
 pub fn run(self: *Self) !void {
-    try self.collectInputStep();
+    // try self.collectInputStep();
+    const from = self.pipeline_read_count;
+    const to = self.pipeline.totalWriteCount();
+    self.pipeline_read_count = to;
+
+    const split_slice = try self.pipeline.readRingBuffer(from, to);
+    const split_segments = types.splitSliceToSegments(&split_slice);
+    const split_buffered_steps = types.splitSegmentsToBufferedSteps(&split_segments);
+
+    try self.buffered_mixer.step.write(&split_buffered_steps.first);
+    try self.buffered_mixer.step.write(&split_buffered_steps.second);
 }
 
-fn collectInputStep(self: *Self) !void {
-    const frame_size = self.buffered_denoiser.getChunkSize();
-    const p = self.pipeline;
+// fn collectInputStep(self: *Self) !void {
+//     const frame_size = self.buffered_denoiser.getChunkSize();
+//     const p = self.pipeline;
 
-    while (p.totalWriteCount() - self.pipeline_read_count >= frame_size) {
-        const from = self.pipeline_read_count;
-        const to = from + frame_size;
-        self.pipeline_read_count = to;
+//     while (p.totalWriteCount() - self.pipeline_read_count >= frame_size) {
+//         const from = self.pipeline_read_count;
+//         const to = from + frame_size;
+//         self.pipeline_read_count = to;
 
-        const split_slice = try self.pipeline.sliceSegment(from, to);
+//         const split_slice = try self.pipeline.sliceSegment(from, to);
 
-        const split_input_1 = BufferedStep.Result{
-            .segment = &Segment{
-                .index = split_slice.first_index,
-                .channel_pcm_buf = split_slice.first,
-            },
-            .metadata = .{},
-        };
-        const split_input_2 = BufferedStep.Result{
-            .segment = &Segment{
-                .index = split_slice.second_index,
-                .channel_pcm_buf = split_slice.second,
-            },
-            .metadata = .{},
-        };
+//         const split_input_1 = BufferedStep.Result{
+//             .segment = &Segment{
+//                 .index = split_slice.first_index,
+//                 .channel_pcm_buf = split_slice.first,
+//             },
+//             .metadata = .{},
+//         };
+//         const split_input_2 = BufferedStep.Result{
+//             .segment = &Segment{
+//                 .index = split_slice.second_index,
+//                 .channel_pcm_buf = split_slice.second,
+//             },
+//             .metadata = .{},
+//         };
 
-        // std.debug.print("collectInput: {d}, {d}\n", .{ split_input_1.segment.length(), split_input_2.segment.length() });
+//         // std.debug.print("collectInput: {d}, {d}\n", .{ split_input_1.segment.length(), split_input_2.segment.length() });
 
-        const result_1 = self.buffered_volume_analyzer.write(&split_input_1);
-        const result_2 = self.buffered_volume_analyzer.write(&split_input_2);
+//         const result_1 = self.buffered_volume_analyzer.write(&split_input_1);
+//         const result_2 = self.buffered_volume_analyzer.write(&split_input_2);
 
-        try self.denoiserStep(&result_1);
-        try self.denoiserStep(&result_2);
-    }
-}
+//         try self.denoiserStep(&result_1);
+//         try self.denoiserStep(&result_2);
+//     }
+// }
 
-fn denoiserStep(
-    self: *Self,
-    input: *const BufferedStep.Result,
-) !void {
-    var input_offset: usize = 0;
-    while (true) {
-        const denoised_result = try self.buffered_denoiser.write(input, input_offset);
+// fn denoiserStep(
+//     self: *Self,
+//     input: *const BufferedStep.Result,
+// ) !void {
+//     var input_offset: usize = 0;
+//     while (true) {
+//         const denoised_result = try self.buffered_denoiser.write(input, input_offset);
 
-        if (denoised_result.denoised_segment == null) return;
+//         if (denoised_result.denoised_segment == null) return;
 
-        var fft_input = BufferedStep.Result{
-            .segment = denoised_result.denoised_segment.?,
-            .metadata = denoised_result.metadata.?,
-        };
+//         const fft_input = BufferedStep.Result{
+//             .segment = denoised_result.denoised_segment.?,
+//             .metadata = denoised_result.metadata.?,
+//         };
+//         _ = fft_input; // autofix
 
-        try self.fftStep(&fft_input);
+//         // try self.fftStep(&fft_input);
 
-        if (denoised_result.n_remaining_input == 0) return;
-        input_offset = input.segment.length() - denoised_result.n_remaining_input;
-    }
-}
+//         if (denoised_result.n_remaining_input == 0) return;
+//         input_offset = input.segment.length() - denoised_result.n_remaining_input;
+//     }
+// }
 
-fn fftStep(
-    self: *Self,
-    input: *const BufferedStep.Result,
-) !void {
-    // Denoiser segment could be larger than the FFT buffer (depending on FFT size)
-    // So we might have to split it into multiple FFT buffer writes
-    var input_offset: usize = 0;
-    while (true) {
-        const result = try self.buffered_fft.write(input, input_offset);
-        if (result.fft_result == null) return;
+// fn fftStep(
+//     self: *Self,
+//     input: *const BufferedStep.Result,
+// ) !void {
+//     // Denoiser segment could be larger than the FFT buffer (depending on FFT size)
+//     // So we might have to split it into multiple FFT buffer writes
+//     var input_offset: usize = 0;
+//     while (true) {
+//         const result = try self.buffered_fft.write(input, input_offset);
+//         if (result.fft_result == null) return;
 
-        try self.stateMachineStep(&result.fft_result.?);
+//         try self.stateMachineStep(&result.fft_result.?);
 
-        if (result.n_remaining_input == 0) return;
-        input_offset = input.segment.length() - result.n_remaining_input;
-    }
-}
+//         if (result.n_remaining_input == 0) return;
+//         input_offset = input.segment.length() - result.n_remaining_input;
+//     }
+// }
 
-fn stateMachineStep(
-    self: *Self,
-    fft_result: *const BufferedFFT.Result,
-) !void {
-    const vad_result = try self.vad_machine.run(fft_result);
+// fn stateMachineStep(
+//     self: *Self,
+//     fft_result: *const BufferedFFT.Result,
+// ) !void {
+//     const vad_result = try self.vad_machine.run(fft_result);
 
-    switch (vad_result.recording_state) {
-        .started => {
-            log.info("Starting recording at: {d}", .{vad_result.sample_number});
-            try self.pipeline.startRecording(vad_result.sample_number);
-        },
-        .completed => {
-            log.info("Completing recording at: {d}", .{vad_result.sample_number});
-            try self.pipeline.endRecording(vad_result.sample_number, true);
-        },
-        .aborted => {
-            log.info("Aborting recording at: {d}", .{vad_result.sample_number});
-            try self.pipeline.endRecording(vad_result.sample_number, false);
-        },
-        .none => {},
-    }
+//     switch (vad_result.recording_state) {
+//         .started => {
+//             log.info("Starting recording at: {d}", .{vad_result.sample_number});
+//             try self.pipeline.startRecording(vad_result.sample_number);
+//         },
+//         .completed => {
+//             log.info("Completing recording at: {d}", .{vad_result.sample_number});
+//             try self.pipeline.endRecording(vad_result.sample_number, true);
+//         },
+//         .aborted => {
+//             log.info("Aborting recording at: {d}", .{vad_result.sample_number});
+//             try self.pipeline.endRecording(vad_result.sample_number, false);
+//         },
+//         .none => {},
+//     }
 
-    // Run the VAD machines for the alternative VADs (training)
-    if (self.alt_vad_machines) |alt_vads| {
-        for (alt_vads) |*alt_vad| {
-            _ = try alt_vad.run(fft_result);
-        }
-    }
-}
+//     // Run the VAD machines for the alternative VADs (training)
+//     if (self.alt_vad_machines) |alt_vads| {
+//         for (alt_vads) |*alt_vad| {
+//             _ = try alt_vad.run(fft_result);
+//         }
+//     }
+// }
 
 test {
     _ = std.testing.refAllDecls(@This());
