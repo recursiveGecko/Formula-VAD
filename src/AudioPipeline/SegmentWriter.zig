@@ -49,10 +49,10 @@ pub fn isFull(self: *Self) bool {
 /// the buffer is full and the buffer segment should be used in some way before
 /// calling .reset(), followed by a second .write() with the offset returned from this call.
 pub fn write(self: *Self, source: *const Segment, read_offset: usize) !usize {
-    var segment = self.internal_segment;
+    var internal_segment = self.internal_segment;
 
     // Determine the capacity of the internal buffer
-    const capacity = segment.length();
+    const capacity = internal_segment.length();
     const remaining_capacity = capacity - @min(self.write_index, capacity);
 
     if (remaining_capacity == 0) {
@@ -66,15 +66,15 @@ pub fn write(self: *Self, source: *const Segment, read_offset: usize) !usize {
     const n_samples_to_write = @min(remaining_capacity, n_samples_in_source);
 
     // Ensure the number of channels match
-    if (segment.channel_pcm_buf.len != source.channel_pcm_buf.len) {
+    if (internal_segment.channel_pcm_buf.len != source.channel_pcm_buf.len) {
         return error.ChannelCountMismatch;
     }
 
-    const n_channels = segment.channel_pcm_buf.len;
+    const n_channels = internal_segment.channel_pcm_buf.len;
 
     for (0..n_channels) |chan_idx| {
         // slices of each channel
-        var dst_chan = segment.writablePCM()[chan_idx];
+        var dst_chan = internal_segment.writablePCM()[chan_idx];
         var src_chan = source.channel_pcm_buf[chan_idx];
 
         @memcpy(
