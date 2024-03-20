@@ -10,7 +10,6 @@ const NSNet2 = @import("../NSNet2.zig");
 const Self = @This();
 
 allocator: Allocator,
-sample_rate: usize,
 denoiser: NSNet2,
 out_segment: Segment,
 out_result: BufferedStep.Result,
@@ -21,7 +20,7 @@ pub fn init(
     allocator: Allocator,
     name: []const u8,
     model_path: ?[:0]const u8,
-    sample_rate: usize,
+    in_sample_rate: usize,
     expect_output: bool,
 ) !*Self {
     var self = try allocator.create(Self);
@@ -30,16 +29,15 @@ pub fn init(
     var out_segment = try Segment.initWithCapacity(
         allocator,
         1,
-        NSNet2.getChunkSize(sample_rate),
+        NSNet2.getChunkSize(in_sample_rate),
     );
     errdefer out_segment.deinit();
 
-    var denoiser = try NSNet2.init(allocator, sample_rate, model_path);
+    var denoiser = try NSNet2.init(allocator, in_sample_rate, model_path);
     errdefer denoiser.deinit();
 
     self.* = .{
         .allocator = allocator,
-        .sample_rate = sample_rate,
         .denoiser = denoiser,
         .out_segment = out_segment,
         .out_result = .{
@@ -47,11 +45,11 @@ pub fn init(
             .segment = &self.out_segment,
         },
         .audio_config = .{
-            .buffer_size = NSNet2.getChunkSize(sample_rate),
+            .buffer_size = NSNet2.getChunkSize(in_sample_rate),
             .in_channels = 1,
-            .in_sample_rate = 48_000,
+            .in_sample_rate = in_sample_rate,
             .out_channels = 1,
-            .out_sample_rate = 48_000,
+            .out_sample_rate = in_sample_rate,
             .expect_output = expect_output,
         },
         .step = undefined,

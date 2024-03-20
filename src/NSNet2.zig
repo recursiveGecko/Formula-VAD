@@ -45,6 +45,10 @@ pub fn init(
     const window = try createWindow(allocator);
     errdefer allocator.free(window);
 
+    if (sample_rate % 16_000 != 0) {
+        std.debug.panic("Invalid NSNet2 sample rate: {d}", .{sample_rate});
+    }
+
     //
     // ONNX Runtime
     //

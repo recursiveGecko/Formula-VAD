@@ -80,7 +80,7 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !*Self {
         allocator,
         "denoiser",
         config.denoiser_model_path,
-        sample_rate,
+        self.buffered_mixer.audio_config.out_sample_rate,
         true,
     );
     errdefer self.buffered_denoiser.deinit();
@@ -91,7 +91,7 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !*Self {
         .{
             .fft_size = config.fft_size,
             .hop_size = config.fft_size,
-            .sample_rate = sample_rate,
+            .sample_rate = self.buffered_denoiser.audio_config.out_sample_rate,
         },
         self,
     );
