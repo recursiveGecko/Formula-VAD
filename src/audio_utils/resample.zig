@@ -1,7 +1,12 @@
 const std = @import("std");
 
 pub fn calcDownsampleRate(in_sample_rate: usize, base_rate: usize) usize {
-    if (in_sample_rate % base_rate != 0) @panic("Invalid sample rate - must be divisible by base_rate");
+    if (in_sample_rate % base_rate != 0) {
+        std.debug.panic(
+            "Invalid sample rate {d} - must be divisible by base_rate {d}",
+            .{ in_sample_rate, base_rate },
+        );
+    }
     return in_sample_rate / base_rate;
 }
 
@@ -11,7 +16,10 @@ pub fn downsampleAudio(
     downsample_rate: usize,
 ) void {
     if (input_samples.len != output_samples.len * downsample_rate) {
-        @panic("Invalid downsampling inputs");
+        std.debug.panic(
+            "Invalid downsampling inputs: in({d}) / rate({d}) -> out({d})",
+            .{ input_samples.len, downsample_rate, output_samples.len },
+        );
     }
 
     const n_steps = input_samples.len / downsample_rate;
@@ -30,7 +38,10 @@ pub fn upsampleAudio(
     upsample_rate: usize,
 ) f32 {
     if (input_samples.len * upsample_rate != output_samples.len) {
-        @panic("Invalid upsampling inputs");
+        std.debug.panic(
+            "Invalid upsampling inputs: in({d}) * rate({d}) -> out({d})",
+            .{ input_samples.len, upsample_rate, output_samples.len },
+        );
     }
 
     const n_interpolate = upsample_rate - 1;
