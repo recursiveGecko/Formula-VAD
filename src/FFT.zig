@@ -26,30 +26,30 @@ allocator: Allocator,
 kiss_cfg: kissfft.kiss_fftr_cfg = null,
 buf_real: []f32,
 buf_cpx: []kissfft.kiss_fft_cpx,
-n_fft: usize,
+fft_size: usize,
 sample_rate: usize,
 mode_inverse: bool,
 
 /// Initialize a new reusable FFT instance for given FFT size and sample rate.
 pub fn init(
     allocator: Allocator,
-    n_fft: usize,
+    fft_size: usize,
     sample_rate: usize,
     mode_inverse: bool,
 ) !*Self {
-    if (n_fft == 0 or @mod(n_fft, 2) != 0) {
+    if (fft_size == 0 or @mod(fft_size, 2) != 0) {
         return error.InvalidFFTSize;
     }
 
     // Allocate input and output buffers
-    const buf_real = try allocator.alloc(f32, n_fft);
+    const buf_real = try allocator.alloc(f32, fft_size);
     errdefer allocator.free(buf_real);
 
-    const buf_cpx = try allocator.alloc(kissfft.kiss_fft_cpx, n_fft);
+    const buf_cpx = try allocator.alloc(kissfft.kiss_fft_cpx, fft_size);
     errdefer allocator.free(buf_cpx);
 
     const kiss_cfg = kissfft.kiss_fftr_alloc(
-        @intCast(n_fft),
+        @intCast(fft_size),
         @intFromBool(mode_inverse),
         null,
         null,
@@ -63,7 +63,7 @@ pub fn init(
 
     self.* = Self{
         .allocator = allocator,
-        .n_fft = n_fft,
+        .fft_size = fft_size,
         .kiss_cfg = kiss_cfg,
         .buf_real = buf_real,
         .buf_cpx = buf_cpx,
@@ -87,16 +87,16 @@ pub fn fft(
     window: []const f32,
     bins: []Complex,
 ) !void {
-    if (samples.len != self.n_fft) {
+    if (samples.len != self.fft_size) {
         return error.InvalidSamplesLength;
     }
 
-    if (window.len != self.n_fft) {
+    if (window.len != self.fft_size) {
         return error.InvalidWindowLength;
     }
 
-    if (bins.len != self.binCount()) {
-        std.debug.print("bins.len: {} {}\n", .{ bins.len, self.binCount() });
+    if (bins.len != binCount(self.fft_size)) {
+        std.debug.print("bins.len: {} {}\n", .{ bins.len, binCount(self.fft_size) });
         return error.InvalidResultLength;
     }
 
@@ -116,11 +116,11 @@ pub fn invFft(
     bins: []const Complex,
     result: []f32,
 ) !void {
-    if (bins.len != self.binCount()) {
+    if (bins.len != binCount(self.fft_size)) {
         return error.InvalidBinsLength;
     }
 
-    if (result.len != self.n_fft) {
+    if (result.len != self.fft_size) {
         return error.InvalidResultLength;
     }
 
@@ -133,27 +133,27 @@ pub fn invFft(
 }
 
 /// Query the number of usable bins in the FFT output
-pub fn binCount(self: Self) usize {
-    return (self.n_fft / 2) + 1;
+pub fn binCount(fft_size: usize) usize {
+    return (fft_size / 2) + 1;
 }
 
 /// Query the width of each bin in Hz
-pub fn binWidth(self: Self) f32 {
-    const sample_rate_f: f32 = @floatFromInt(self.sample_rate);
-    const n_fft_f: f32 = @floatFromInt(self.n_fft);
+pub fn binWidth(sample_rate: usize, fft_size: usize) f32 {
+    const sample_rate_f: f32 = @floatFromInt(sample_rate);
+    const fft_size_f: f32 = @floatFromInt(fft_size);
 
-    return sample_rate_f / n_fft_f;
+    return sample_rate_f / fft_size_f;
 }
 
 /// Query the Nyquist frequency of the FFT
-pub fn nyquistFreq(self: Self) f32 {
-    const sample_rate_f: f32 = @floatFromInt(self.sample_rate);
+pub fn nyquistFreq(sample_rate: usize) f32 {
+    const sample_rate_f: f32 = @floatFromInt(sample_rate);
     return sample_rate_f / 2;
 }
 
 /// Converts given frequency in Hz to the nearest FFT bin index
-pub fn freqToBin(self: Self, freq: f32) !usize {
-    if (freq > self.nyquistFreq()) {
+pub fn freqToBin(sample_rate: usize, freq: f32, fft_size: usize) !usize {
+    if (freq > nyquistFreq(sample_rate)) {
         return error.OutOfRange;
     }
 
@@ -161,20 +161,20 @@ pub fn freqToBin(self: Self, freq: f32) !usize {
         return error.NegativeFrequency;
     }
 
-    const bin_f = @round(freq / self.binWidth());
+    const bin_f = @round(freq / binWidth(sample_rate, fft_size));
     return @intFromFloat(bin_f);
 }
 
 /// Converts given FFT bin index to the corresponding frequency in Hz
-pub fn binToFreq(self: Self, bin_index: usize) !f32 {
-    const max_bin_index = self.binCount() - 1;
+pub fn binToFreq(sample_rate: usize, fft_size: usize, bin_index: usize) !f32 {
+    const max_bin_index = binCount() - 1;
 
     if (bin_index > max_bin_index) {
         return error.OutOfRange;
     }
 
     const bin_f: f32 = @floatFromInt(bin_index);
-    const bin_width = self.binWidth();
+    const bin_width = binWidth(sample_rate, fft_size);
     return bin_f * bin_width;
 }
 

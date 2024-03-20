@@ -213,6 +213,8 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
             break;
         } else if (total_written > prev_result.segment.length()) {
             @setCold(true);
+            // This might indicate that another part of the program is trampling over the memory
+            // referenced by prev_result.
             std.debug.panic(
                 "BufferedStep '{s}' wrote more samples ({d}) than the input ({d})",
                 .{ self.name, total_written, prev_result.segment.length() },

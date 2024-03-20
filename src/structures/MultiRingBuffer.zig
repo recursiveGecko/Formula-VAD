@@ -1,19 +1,27 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
+const ObjectPool = @import("./ObjectPool.zig").ObjectPool;
 
 pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
     return struct {
         const Self = @This();
+        const SplitSlicePool = ObjectPool(SplitSlice, SplitSlice.CreateArg);
+
         allocator: Allocator,
         capacity: TCounter,
         n_channels: usize,
         raw_buffer: []TData,
         channel_buffers: [][]TData,
         total_write_count: TCounter = 0,
-        temp_split_slice: SplitSlice,
+        split_slice_pool: *SplitSlicePool,
 
         pub const SplitSlice = struct {
+            pub const CreateArg = struct {
+                n_channels: usize,
+                mem_pool: *SplitSlicePool,
+            };
+
             /// sample index of the first sample in `first` slice
             first_index: TCounter = 0,
             first: []const []const TData,
@@ -21,12 +29,31 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
             second_index: TCounter = 0,
             second: []const []const TData,
 
-            pub fn firstLength(self: *const @This()) TCounter {
+            mem_pool: *SplitSlicePool,
+
+            pub fn init(allocator: Allocator, arg: CreateArg) !SplitSlice {
+                const first = try allocator.alloc([]TData, arg.n_channels);
+                errdefer allocator.free(first);
+                const second = try allocator.alloc([]TData, arg.n_channels);
+                errdefer allocator.free(second);
+
+                return SplitSlice{
+                    .first = first,
+                    .second = second,
+                    .mem_pool = arg.mem_pool,
+                };
+            }
+
+            pub fn firstLength(self: *const SplitSlice) TCounter {
                 return self.first[0].len;
             }
 
-            pub fn secondLength(self: *const @This()) TCounter {
+            pub fn secondLength(self: *const SplitSlice) TCounter {
                 return self.second[0].len;
+            }
+
+            pub fn release(self: *SplitSlice) void {
+                self.mem_pool.release(self);
             }
         };
 
@@ -36,17 +63,18 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
 
             const channel_buffers = try allocator.alloc([]TData, n_channels);
             errdefer allocator.free(channel_buffers);
-
-            const temp_split_slice = SplitSlice{
-                .first = try allocator.alloc([]TData, n_channels),
-                .second = try allocator.alloc([]TData, n_channels),
-            };
-
             for (0..n_channels) |i| {
                 const from = i * capacity;
                 const to = from + capacity;
                 channel_buffers[i] = raw_buffer[from..to];
             }
+
+            const split_slice_pool = try SplitSlicePool.init(allocator, &SplitSlice.init, null);
+            split_slice_pool.create_arg = .{
+                .n_channels = n_channels,
+                .mem_pool = split_slice_pool,
+            };
+            errdefer split_slice_pool.deinit();
 
             const self = Self{
                 .allocator = allocator,
@@ -54,7 +82,7 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
                 .capacity = capacity,
                 .raw_buffer = raw_buffer,
                 .channel_buffers = channel_buffers,
-                .temp_split_slice = temp_split_slice,
+                .split_slice_pool = split_slice_pool,
             };
 
             return self;
@@ -63,8 +91,7 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
         pub fn deinit(self: *Self) void {
             self.allocator.free(self.raw_buffer);
             self.allocator.free(self.channel_buffers);
-            self.allocator.free(self.temp_split_slice.first);
-            self.allocator.free(self.temp_split_slice.second);
+            self.split_slice_pool.deinit();
         }
 
         pub fn writeIndex(self: *const Self) usize {
@@ -181,12 +208,13 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
             return n_write_total_count;
         }
 
-        /// Returns a split slice of multi-channel ring buffer
+        /// Returns a split slice of multi-channel ring buffer, SplitSlice must be released
+        /// by calling `.release()`
         pub fn sliceBuffer(
             self: *Self,
             abs_from: TCounter,
             abs_to: TCounter,
-        ) !SplitSlice {
+        ) !*SplitSlice {
             // Valid slicing range
             const max_abs_idx = self.total_write_count;
             const min_abs_idx = max_abs_idx - @min(self.capacity, max_abs_idx);
@@ -213,7 +241,7 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
 
             // std.debug.print("abs: [{d:10}, {d:10} )   rel: [{d:10} .. +{d:8} )\n", .{ abs_from, abs_to, rel_start, n_to_end });
 
-            var split_slice = self.temp_split_slice;
+            var split_slice = try self.split_slice_pool.acquire();
             const sliceable_first = @constCast(split_slice.first);
             const sliceable_second = @constCast(split_slice.second);
 
@@ -297,6 +325,7 @@ test "sliceBuffer()" {
     try t.expectEqualSlices(i32, &.{ 3, 8, 5, 9, 4 }, pcm);
 
     const split_slice = try mr_buffer.sliceBuffer(3, 8);
+    defer split_slice.release();
 
     try t.expectEqualSlices(i32, &.{ 9, 4 }, split_slice.first[0]);
     try t.expectEqual(3, split_slice.first_index);

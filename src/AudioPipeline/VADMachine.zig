@@ -52,10 +52,7 @@ pub const Config = struct {
 
 allocator: Allocator,
 sample_rate: usize,
-n_channels: usize,
 config: Config,
-// "Read only" access to FFT pipeline for calculating volume in speech band
-buffered_fft: BufferedFFT,
 speech_state: SpeechState = .closed,
 long_term_speech_volume: RollingAverage,
 short_term_speech_volume: RollingAverage,
@@ -67,16 +64,13 @@ speech_end_index: ?u64 = null,
 channel_vol_ratio_sum: f32 = 0,
 channel_vol_ratio_count: usize = 0,
 vad_threshold_met_cumulative_sec: f32 = 0,
-// Stores temporary results when calculating per-channel volumes
-temp_channel_volumes: []f32,
 /// End result - VAD segments
 vad_segments: std.ArrayList(VADPipeline.SpeechSegment),
 
-pub fn init(allocator: Allocator, config: Config, vad: VADPipeline) !Self {
-    const sample_rate = vad.sample_rate;
+pub fn init(allocator: Allocator, config: Config, vad_pipeline: *const VADPipeline) !Self {
+    const sample_rate = vad_pipeline.sample_rate;
     const sample_rate_f: f32 = @floatFromInt(sample_rate);
-    const n_channels = vad.n_channels;
-    const fft_size = vad.config.fft_size;
+    const fft_size = vad_pipeline.config.fft_size;
     const fft_size_f: f32 = @floatFromInt(fft_size);
 
     const eval_per_sec = sample_rate_f / fft_size_f;
@@ -105,22 +99,16 @@ pub fn init(allocator: Allocator, config: Config, vad: VADPipeline) !Self {
     );
     errdefer channel_vol_ratio.deinit();
 
-    const temp_channel_volumes = try allocator.alloc(f32, n_channels);
-    errdefer allocator.free(temp_channel_volumes);
-
     var vad_segments = try std.ArrayList(VADPipeline.SpeechSegment).initCapacity(allocator, 100);
     errdefer vad_segments.deinit();
 
     const self = Self{
         .allocator = allocator,
         .config = config,
-        .buffered_fft = vad.buffered_fft,
         .sample_rate = sample_rate,
-        .n_channels = n_channels,
         .long_term_speech_volume = long_term_speech_avg,
         .short_term_speech_volume = short_term_speech_avg,
         .channel_vol_ratio = channel_vol_ratio,
-        .temp_channel_volumes = temp_channel_volumes,
         .vad_segments = vad_segments,
     };
 
@@ -131,31 +119,22 @@ pub fn deinit(self: *Self) void {
     self.long_term_speech_volume.deinit();
     self.short_term_speech_volume.deinit();
     self.channel_vol_ratio.deinit();
-    self.allocator.free(self.temp_channel_volumes);
     self.vad_segments.deinit();
 }
 
 pub fn run(
     self: *Self,
-    fft_result: *const BufferedFFT.Result,
+    fft_result: *const BufferedFFT.FFTResult,
 ) !Result {
     const sample_rate_f: f32 = @floatFromInt(self.sample_rate);
     const config = self.config;
 
     // Find the average volume in the speech band
-    try self.buffered_fft.averageVolumeInBand(
+    const vol_in_speech_band = try BufferedFFT.averageVolumeInBand(
         fft_result,
         config.speech_min_freq,
         config.speech_max_freq,
-        self.temp_channel_volumes,
     );
-
-    var min_volume: f32 = 999;
-    var max_volume: f32 = 0;
-    for (self.temp_channel_volumes) |volume| {
-        if (volume < min_volume) min_volume = volume;
-        if (volume > max_volume) max_volume = volume;
-    }
 
     // Number of consecutive samples above the threshold before the VAD opens
     const min_consecutive_to_open: usize = @intFromFloat(sample_rate_f * config.min_consecutive_sec_to_open);
@@ -163,7 +142,7 @@ pub fn run(
     const max_gap_samples: usize = @intFromFloat(sample_rate_f * config.max_speech_gap_sec);
 
     // Use the minimum for activation as it's likely the one containing less engine noise, and therefore more accurate
-    const short_term = self.short_term_speech_volume.push(min_volume);
+    const short_term = self.short_term_speech_volume.push(vol_in_speech_band);
     const channel_vol_ratio = self.channel_vol_ratio.push(fft_result.vad_metadata.volume_ratio orelse 0);
 
     const threshold_base = self.long_term_speech_volume.last_avg orelse config.initial_long_term_avg orelse short_term;
@@ -174,7 +153,7 @@ pub fn run(
     // TODO: This is problematic, if the threshold happens to be set too low, it would cause
     // continuous VAD activation which would prevent self-correction
     if (!threshold_met) {
-        _ = self.long_term_speech_volume.push(min_volume);
+        _ = self.long_term_speech_volume.push(vol_in_speech_band);
     }
 
     // VAD segment to emit after speech ends
@@ -240,7 +219,7 @@ pub fn run(
 
 fn trackSpeechStats(
     self: *Self,
-    fft_result: *const BufferedFFT.Result,
+    fft_result: *const BufferedFFT.FFTResult,
     threshold_met: bool,
     from_state: SpeechState,
     to_state: SpeechState,

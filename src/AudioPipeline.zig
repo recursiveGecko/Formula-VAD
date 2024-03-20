@@ -27,7 +27,7 @@ allocator: Allocator,
 config: Config,
 ring_buffer: AudioMRB,
 recorder: MRBRecorder,
-vad: VADPipeline,
+vad: *VADPipeline,
 callbacks: ?Callbacks = null,
 
 pub fn init(
@@ -113,7 +113,8 @@ pub fn pushSamples(self: *Self, channel_pcm: []const []const f32) !u64 {
 }
 
 /// Slice samples using absolute indices, from `abs_from` inclusive to `abs_to` exclusive.
-pub fn readRingBuffer(self: *Self, abs_from: u64, abs_to: u64) !AudioMRB.SplitSlice {
+/// SplitSlice must be released by calling `.release()`
+pub fn readRingBuffer(self: *Self, abs_from: u64, abs_to: u64) !*AudioMRB.SplitSlice {
     return try self.ring_buffer.sliceBuffer(
         abs_from,
         abs_to,
@@ -149,7 +150,7 @@ fn maybeRunPipeline(self: *Self) !void {
 //
 
 test {
-    _ = @import("./AudioPipeline/SegmentWriter.zig");
+    // std.testing.refAllDecls(@This());
 }
 
 test "simple leak test" {

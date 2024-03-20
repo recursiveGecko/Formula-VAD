@@ -136,6 +136,7 @@ fn maybeRecordBuffer(self: *Self, suggested_to_idx: usize) !void {
         next_sample_idx,
         record_to_idx,
     );
+    defer split_slice.release();
 
     const first_segment = Segment{
         .index = split_slice.first_index,
