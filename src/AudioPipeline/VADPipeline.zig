@@ -10,7 +10,6 @@ const SegmentWriter = @import("./SegmentWriter.zig");
 const VADMachine = @import("./VADMachine.zig");
 const VADMetadata = @import("./VADMetadata.zig");
 const BufferedStep = @import("./BufferedStep.zig");
-const BufferedVolumeAnalyzer = @import("./BufferedVolumeAnalyzer.zig");
 const BufferedNSNet2Denoiser = @import("./BufferedNSNet2Denoiser.zig");
 const BufferedDFNDenoiser = @import("./BufferedDFNDenoiser.zig");
 const BufferedMixer = @import("BufferedMixer.zig");
