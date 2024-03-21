@@ -200,15 +200,16 @@ fn addKissFFT(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void
 fn addDeepFilterNet(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void {
     _ = b; // autofix
     _ = options; // autofix
-    exe.addObjectFile(.{ .path = "tmp/libdf/lib/libdeepfilter.a" });
-    exe.linkSystemLibrary("unwind");
-
-    // exe.linkSystemLibrary("deepfilter");
-    // exe.addLibraryPath(.{ .path = "libdf/lib" });
-    // exe.addRPath(.{ .path = "libdf/lib" });
-
     exe.addIncludePath(.{ .path = "tmp/libdf/include" });
-    // exe.linkLibC();
+
+    // exe.addObjectFile(.{ .path = "tmp/libdf/lib/libdeepfilter.a" });
+    // exe.linkLibCpp(); // either works
+    // exe.linkSystemLibrary("unwind");
+
+    exe.linkSystemLibrary("deepfilter");
+    exe.addLibraryPath(.{ .path = "tmp/libdf/lib" });
+    exe.addRPath(.{ .path = "tmp/libdf/lib" });
+    exe.linkLibC();
 }
 
 fn addSndfile(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void {
