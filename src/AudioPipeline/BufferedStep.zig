@@ -11,7 +11,8 @@ pub const Result = struct {
 
 pub const AudioConfig = struct {
     expect_output: bool = true,
-    buffer_size: usize,
+    /// if the buffer size is null, the step is unbuffered
+    buffer_size: ?usize,
     in_channels: usize,
     out_channels: usize,
     in_sample_rate: usize,
@@ -87,11 +88,12 @@ const Self = @This();
 
 name: []const u8,
 allocator: std.mem.Allocator,
-buffer_writer: SegmentWriter,
+buffer_writer: ?SegmentWriter,
 buffer_metadata: VADMetadata = .{},
-last_out_index: if (builtin.mode == .Debug) ?u64 else ?void = null,
 audio_config: AudioConfig,
 processor: Processor,
+prev_out_index: if (builtin.mode == .Debug) ?u64 else ?void = null,
+prev_out_length: if (builtin.mode == .Debug) ?u64 else ?void = null,
 prev: ?*Self = null,
 next: ?*Self = null,
 
@@ -104,12 +106,17 @@ pub fn init(
     const self = try allocator.create(Self);
     errdefer allocator.destroy(self);
 
-    const buffer_writer = try SegmentWriter.init(
-        allocator,
-        audio_config.in_channels,
-        audio_config.buffer_size,
-    );
-    errdefer buffer_writer.deinit();
+    const buffer_writer = val: {
+        if (audio_config.buffer_size) |buffer_size| {
+            break :val try SegmentWriter.init(
+                allocator,
+                audio_config.in_channels,
+                buffer_size,
+            );
+        } else {
+            break :val null;
+        }
+    };
 
     self.* = .{
         .name = name,
@@ -125,8 +132,7 @@ pub fn init(
 pub fn deinit(self: *Self) void {
     if (self.next) |n| n.prev = null;
     if (self.prev) |p| p.next = null;
-
-    self.buffer_writer.deinit();
+    if (self.buffer_writer) |*w| w.deinit();
     self.allocator.destroy(self);
 }
 
@@ -142,43 +148,62 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
         std.debug.panic("BufferedStep '{s}' doesn't have an expected output connected", .{self.name});
     }
 
-    if (prev_result.segment.length() == 0) return;
+    const input_index = prev_result.segment.index;
+    const input_len = prev_result.segment.length();
+    if (input_len == 0) return;
+
+    // In certain conditions we can skip unnecessary buffering:
+    // 1. The step is unbuffered (the processor can operate on arbitrary input sizes)
+    // 2. The input exactly matches our processor's expected input size and our buffer is currently empty
+    const expected_buf_size = self.audio_config.buffer_size;
+    const step_is_unbuffered = expected_buf_size == null;
+    const could_skip_buffer = !step_is_unbuffered and input_len == expected_buf_size.? and self.buffer_writer.?.writtenCount() == 0;
+    const skip_buffering = step_is_unbuffered or could_skip_buffer;
 
     var total_written: usize = 0;
     while (true) {
-        // TODO: We could bypass the buffer when input exactly matches the required size and our buffer is otherwise empty
-        const n_written = try self.buffer_writer.write(prev_result.segment, total_written);
-        total_written += n_written;
+        if (!skip_buffering) {
+            // Write samples to the buffer and combine associated metadata
+            const n_written = try self.buffer_writer.?.write(prev_result.segment, total_written);
+            self.buffer_metadata.push(prev_result.metadata, n_written);
+            total_written += n_written;
+        } else {
+            total_written = input_len;
+        }
 
-        self.buffer_metadata.push(prev_result.metadata, n_written);
-
-        if (self.buffer_writer.isFull()) {
+        if (skip_buffering or self.buffer_writer.?.isFull()) {
             // Result of this buffering step
-            const buffer_metadata = self.buffer_metadata.toResult();
-            const processor_input = Result{
-                .metadata = buffer_metadata,
-                .segment = &self.buffer_writer.segment_view,
-            };
+            var processor_input: Result = undefined;
+            if (!skip_buffering) {
+                processor_input = Result{
+                    .metadata = self.buffer_metadata.toResult(),
+                    .segment = &self.buffer_writer.?.segment_view,
+                };
+            } else {
+                processor_input = prev_result.*;
+            }
 
             // Process the input buffer
             const processor_result = self.processor.call(&processor_input);
 
             // Extra sanity checks in debug mode to ensure buffered steps are handling data correctly
             if (builtin.mode == .Debug) {
-                const last_out = self.last_out_index;
-                const this_out = processor_result.segment.index;
+                const prev_out_index = self.prev_out_index;
+                const prev_out_length = self.prev_out_length;
+                const expected_out_index = if (prev_out_index) |i| i + prev_out_length.? else null;
+                const this_out_index = processor_result.segment.index;
 
-                // Correct handling of Segment indices
-                if (last_out != null and last_out.? == this_out) {
+                // Processor is increasing the output segment index correctly
+                if (expected_out_index != null and expected_out_index != this_out_index) {
                     std.debug.panic(
-                        "BufferedStep processor '{s}' didn't increment the segment index of its output. Last seen index: {d}",
-                        .{ self.name, self.last_out_index.? },
+                        "BufferedStep processor '{s}' didn't increment the segment index of its output correctly. Previous index: {?}, previous length: {?}, current index: {d} (expected {?})",
+                        .{ self.name, self.prev_out_index, prev_out_length, this_out_index, expected_out_index },
                     );
                 }
 
-                // Correct handling of metadata
+                // Processor doesn't drop all metadata
                 const empty_metadata = VADMetadata.Result{};
-                const had_metadata = !std.meta.eql(buffer_metadata, empty_metadata);
+                const had_metadata = !std.meta.eql(processor_input.metadata, empty_metadata);
                 const has_metadata = !std.meta.eql(processor_result.metadata, empty_metadata);
                 if (had_metadata and !has_metadata) {
                     std.debug.panic(
@@ -195,7 +220,8 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
                     );
                 }
 
-                self.last_out_index = processor_result.segment.index;
+                self.prev_out_index = processor_result.segment.index;
+                self.prev_out_length = processor_result.segment.length();
             }
 
             // Pass processed output to the next step
@@ -203,10 +229,23 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
                 try next.write(processor_result);
             }
 
-            // Reset our buffer, it's imperative that previous steps set the correct segment index
-            const next_sample_index = prev_result.segment.index + total_written;
-            self.buffer_writer.reset(next_sample_index);
-            self.buffer_metadata = .{};
+            if (builtin.mode == .Debug) {
+                // Basic data integrity checks to ensure that different steps of the pipeline
+                // aren't trampling over each other's memory
+                if (prev_result.segment.length() != input_len) {
+                    std.debug.panic(
+                        "BufferedStep '{s}': prev_result has somehow been modified at index {d} from len={d} to len={d}",
+                        .{ self.name, input_index, input_len, prev_result.segment.length() },
+                    );
+                }
+            }
+
+            if (!step_is_unbuffered) {
+                // Reset our buffer, it's imperative that previous steps set the correct segment index
+                const next_sample_index = prev_result.segment.index + total_written;
+                self.buffer_writer.?.reset(next_sample_index);
+                self.buffer_metadata = .{};
+            }
         }
 
         if (total_written == prev_result.segment.length()) {

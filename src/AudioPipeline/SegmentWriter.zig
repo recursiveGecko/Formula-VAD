@@ -44,6 +44,10 @@ pub fn isFull(self: *Self) bool {
     return self.write_index == self.internal_segment.length();
 }
 
+pub fn writtenCount(self: *Self) usize {
+    return self.write_index;
+}
+
 /// Writes the given segment to the buffer, returning the number of samples written.
 /// When the return value is less than the length of the source buffer, it means that
 /// the buffer is full and the buffer segment should be used in some way before
