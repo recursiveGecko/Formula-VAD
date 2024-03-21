@@ -94,7 +94,7 @@ pub fn pushSamples(self: *Self, channel_pcm: []const []const f32) !u64 {
         const max_written_this_step = @min(n_samples_one_second, n_total_samples - read_offset);
         const expected_write_index = self.totalWriteCount() + max_written_this_step;
 
-        try self.recorder.beforePipelineWrite(expected_write_index);
+        try self.recorder.beforeMRBWrite(expected_write_index);
 
         const n_written = self.ring_buffer.writeAssumeCapacity(
             channel_pcm,

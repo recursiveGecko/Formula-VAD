@@ -40,11 +40,15 @@ pub fn deinit(self: *Self) void {
     self.internal_segment.deinit();
 }
 
-pub fn isFull(self: *Self) bool {
+pub fn isFull(self: *const Self) bool {
     return self.write_index == self.internal_segment.length();
 }
 
-pub fn writtenCount(self: *Self) usize {
+pub fn capacity(self: *const Self) usize {
+    return self.internal_segment.length();
+}
+
+pub fn writtenCount(self: *const Self) usize {
     return self.write_index;
 }
 
@@ -56,8 +60,7 @@ pub fn write(self: *Self, source: *const Segment, read_offset: usize) !usize {
     var internal_segment = self.internal_segment;
 
     // Determine the capacity of the internal buffer
-    const capacity = internal_segment.length();
-    const remaining_capacity = capacity - @min(self.write_index, capacity);
+    const remaining_capacity = self.capacity() - @min(self.write_index, self.capacity());
 
     if (remaining_capacity == 0) {
         return 0;
