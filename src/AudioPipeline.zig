@@ -7,12 +7,17 @@ const MRBRecorder = @import("./AudioPipeline/MRBRecorder.zig");
 const AudioMRB = @import("./types.zig").AudioMRB;
 const VADPipeline = @import("./AudioPipeline/VADPipeline.zig");
 const AudioBuffer = @import("./audio_utils/AudioBuffer.zig");
+const RecordingCoordinator = @import("RecordingCoordinator.zig");
 
 const Self = @This();
 
 pub const Callbacks = struct {
     ctx: *anyopaque,
-    on_recording: ?*const fn (ctx: *anyopaque, recording: *const AudioBuffer) void,
+    on_recording: ?*const fn (
+        ctx: *anyopaque,
+        recorder_name: []const u8,
+        recording: AudioBuffer,
+    ) void,
 };
 
 pub const Config = struct {
@@ -25,56 +30,40 @@ pub const Config = struct {
 
 allocator: Allocator,
 config: Config,
-ring_buffer: AudioMRB,
-recorder: MRBRecorder,
 vad: *VADPipeline,
 callbacks: ?Callbacks = null,
+recording_coordinator: *RecordingCoordinator,
+write_index: u64 = 0,
 
 pub fn init(
     allocator: Allocator,
     config: Config,
     callbacks: ?Callbacks,
 ) !*Self {
-    const buffer_length = config.buffer_length orelse config.sample_rate * 5;
-
-    var ring_buffer = try AudioMRB.init(
-        allocator,
-        config.n_channels,
-        buffer_length,
-    );
-    errdefer ring_buffer.deinit();
-
     var self = try allocator.create(Self);
     errdefer allocator.destroy(self);
 
     self.* = Self{
         .config = config,
         .allocator = allocator,
-        .ring_buffer = ring_buffer,
-        .recorder = undefined,
+        .recording_coordinator = undefined,
         .vad = undefined,
         .callbacks = callbacks,
     };
 
+    self.recording_coordinator = try RecordingCoordinator.init(allocator, self);
+    errdefer self.recording_coordinator.deinit();
+
     self.vad = try VADPipeline.init(self, config.vad_config);
     errdefer self.vad.deinit();
-
-    self.recorder = try MRBRecorder.init(
-        allocator,
-        &self.ring_buffer,
-        config.sample_rate,
-        @ptrCast(&onRecording),
-        self,
-    );
-    errdefer self.recorder.deinit();
 
     return self;
 }
 
 pub fn deinit(self: *Self) void {
     self.vad.deinit();
-    self.ring_buffer.deinit();
-    self.recorder.deinit();
+    // self.ring_buffer.deinit();
+    self.recording_coordinator.deinit();
     self.allocator.destroy(self);
 }
 
@@ -83,60 +72,31 @@ pub fn totalWriteCount(self: *const Self) u64 {
 }
 
 pub fn pushSamples(self: *Self, channel_pcm: []const []const f32) !u64 {
-    const first_sample_index = self.ring_buffer.total_write_count;
+    const segment = Segment.wrapChannelPcmBuf(self.write_index, channel_pcm);
+    self.write_index += segment.length();
 
-    const n_total_samples = channel_pcm[0].len;
-    const n_samples_one_second = self.config.sample_rate;
-
-    var read_offset: usize = 0;
-    while (true) {
-        // We record as many samples as we're going to write
-        const max_written_this_step = @min(n_samples_one_second, n_total_samples - read_offset);
-        const expected_write_index = self.totalWriteCount() + max_written_this_step;
-
-        try self.recorder.beforeMRBWrite(expected_write_index);
-
-        const n_written = self.ring_buffer.writeAssumeCapacity(
-            channel_pcm,
-            read_offset,
-            // Write at most 1 second per step
-            max_written_this_step,
-        );
-        read_offset += n_written;
-
-        try self.maybeRunPipeline();
-        if (read_offset == n_total_samples) break;
-        if (read_offset > n_total_samples) @panic("impossible counter - pushSamples()");
-    }
-
-    return first_sample_index;
+    try self.vad.write(&segment);
+    return segment.index;
 }
 
-/// Slice samples using absolute indices, from `abs_from` inclusive to `abs_to` exclusive.
-/// SplitSlice must be released by calling `.release()`
-pub fn readRingBuffer(self: *Self, abs_from: u64, abs_to: u64) !*AudioMRB.SplitSlice {
-    return try self.ring_buffer.sliceBuffer(
-        abs_from,
-        abs_to,
-    );
+pub fn startRecording(self: *Self, from_sample: usize) void {
+    self.recording_coordinator.start(from_sample);
 }
 
-pub fn startRecording(self: *Self, from_sample: usize) !void {
-    log.info("Starting original & denoised recording from sample {d}", .{from_sample});
-    try self.recorder.startRecording(from_sample);
+pub fn endRecording(self: *Self, to_sample: usize, keep: bool) void {
+    self.recording_coordinator.stop(to_sample, keep);
 }
 
-pub fn endRecording(self: *Self, to_sample: usize, keep: bool) !void {
-    log.info("Ending recording at sample {d}, keep: {}", .{ to_sample, keep });
-    try self.recorder.stopRecording(to_sample, keep);
-}
-
-pub fn onRecording(self: *Self, audio_buffer: *AudioBuffer) void {
+pub fn onRecording(
+    self: *Self,
+    recorder_name: []const u8,
+    audio_buffer: AudioBuffer,
+) void {
     defer audio_buffer.deinit();
     const cb_config = self.callbacks orelse return;
 
     if (cb_config.on_recording) |cb| {
-        cb(cb_config.ctx, audio_buffer);
+        cb(cb_config.ctx, recorder_name, audio_buffer);
     }
 }
 
@@ -148,10 +108,6 @@ fn maybeRunPipeline(self: *Self) !void {
 //
 // Tests
 //
-
-test {
-    // std.testing.refAllDecls(@This());
-}
 
 test "simple leak test" {
     var pipeline = try init(

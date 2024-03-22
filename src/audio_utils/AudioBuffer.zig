@@ -20,8 +20,8 @@ channel_pcm_buf: [][]f32,
 length: usize,
 duration_seconds: f32,
 /// If the AudioBuffer was cut from a larger context (e.g. AudioPipeline),
-/// this is the frame number of the first frame in the original context.
-global_start_frame_number: ?u64 = null,
+/// this is the sample number of the first sample in the original context.
+first_sample_number: ?u64 = null,
 
 pub fn loadFromFile(allocator: Allocator, path: []const u8) !Self {
     var stream = try AudioFileStream.open(allocator, path);
@@ -117,7 +117,7 @@ pub fn saveToFile(
     }
 }
 
-pub fn deinit(self: *Self) void {
+pub fn deinit(self: *const Self) void {
     for (self.channel_pcm_buf) |chan_buf| self.allocator.free(chan_buf);
     self.allocator.free(self.channel_pcm_buf);
 }

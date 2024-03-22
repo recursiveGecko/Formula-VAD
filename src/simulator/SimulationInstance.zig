@@ -20,20 +20,14 @@ const SimulationInstance = @This();
 
 // Wraps the pipeline context that is required for AudioPipeline callbacks
 const PipelineContext = struct {
-    const Ctx = @This();
-
     sim_instance: *SimulationInstance,
 
-    pub fn onOriginalRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
-        const self = castToSelf(opaque_ctx);
-        self.onRecording(audio_buffer, .original);
-    }
-
     pub fn onRecording(
-        self: *Ctx,
-        audio_buffer: *const AudioBuffer,
-        rec_type: enum { original, denoised },
+        self_opaque: *anyopaque,
+        recorder_name: []const u8,
+        audio_buffer: AudioBuffer,
     ) void {
+        const self: *PipelineContext = @ptrCast(@alignCast(self_opaque));
         const allocator = self.sim_instance.main_thread_allocator;
 
         if (self.sim_instance.output_dir == null) return;
@@ -41,7 +35,7 @@ const PipelineContext = struct {
         const audio_file_name = std.fmt.allocPrint(
             allocator,
             "{d}-{s}.ogg",
-            .{ audio_buffer.global_start_frame_number.?, @tagName(rec_type) },
+            .{ audio_buffer.first_sample_number.?, recorder_name },
         ) catch |err| {
             log.err("Failed to allocate file name: {any}", .{err});
             return;
@@ -62,15 +56,11 @@ const PipelineContext = struct {
         log.debug("Saved audio: {s}", .{audio_path});
     }
 
-    pub fn toPipelineCallbacks(self: *Ctx) AudioPipeline.Callbacks {
+    pub fn toPipelineCallbacks(self: *PipelineContext) AudioPipeline.Callbacks {
         return AudioPipeline.Callbacks{
             .ctx = self,
-            .on_recording = &Ctx.onOriginalRecording,
+            .on_recording = &onRecording,
         };
-    }
-
-    fn castToSelf(opaque_ctx: *anyopaque) *Ctx {
-        return @ptrCast(@alignCast(opaque_ctx));
     }
 };
 

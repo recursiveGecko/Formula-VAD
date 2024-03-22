@@ -23,7 +23,7 @@ const audio_utils = @import("../audio_utils.zig");
 
 const Self = @This();
 
-pub const RecordingCB = fn (ctx: *anyopaque, audio_buffer: *AudioBuffer) void;
+pub const RecordingCB = fn (ctx: *anyopaque, audio_buffer: AudioBuffer) void;
 
 allocator: Allocator,
 n_channels: usize,
@@ -83,6 +83,8 @@ pub fn startRecording(self: *Self, from_sample: u64) !void {
         self.end_recording_on_sample = null;
     }
 
+    log.debug("Starting recording at sample {d}", .{from_sample});
+
     self.segment_writer.reset(from_sample);
     self.status = .recording;
 }
@@ -101,6 +103,8 @@ pub fn stopRecording(self: *Self, to_sample: u64, keep: bool) !void {
         return error.EndIndexBeforeStart;
     }
 
+    log.debug("Stopping recording at sample {d}, keep: {s}", .{ to_sample, if (keep) "yes" else "no" });
+
     if (keep) {
         // Schedule the recording to be finalized after we record the specified sample index.
         self.end_recording_on_sample = to_sample;
@@ -113,7 +117,7 @@ pub fn stopRecording(self: *Self, to_sample: u64, keep: bool) !void {
     }
 }
 
-/// Records any samples that would be overwritten by the next write to the MultiRingBuffer
+/// Records any samples that would be overwritten by the next write to the `MultiRingBuffer`
 pub fn beforeMRBWrite(self: *Self, next_write_head: usize) !void {
     if (self.status != .recording) return;
 
@@ -132,7 +136,13 @@ fn maybeRecordBuffer(self: *Self, suggested_to_idx: usize) !void {
     // If we've already recorded up to, or beyond this sample index,
     // there's nothing to do.
     const next_sample_idx = self.endIndex();
-    if (suggested_to_idx <= next_sample_idx) return;
+    if (suggested_to_idx <= next_sample_idx) {
+        log.debug(
+            "Recorder - nothing to do (already recorded). suggested_to_idx={d}, mrb_write_count={d}, next_sample_idx: {d}",
+            .{ suggested_to_idx, self.multi_ring_buffer.total_write_count, next_sample_idx },
+        );
+        return;
+    }
 
     const record_to_idx = @min(
         suggested_to_idx,
@@ -140,9 +150,15 @@ fn maybeRecordBuffer(self: *Self, suggested_to_idx: usize) !void {
     );
     // If we already recorded everything we can currently record,
     // there's nothing to do.
-    if (record_to_idx <= next_sample_idx) return;
+    if (record_to_idx <= next_sample_idx) {
+        log.debug(
+            "Recorder - nothing to do (reached end of MRB). suggested_to_idx={d}, mrb_write_count={d}, record_to_idx={d}, next_sample_idx: {d}",
+            .{ suggested_to_idx, self.multi_ring_buffer.total_write_count, record_to_idx, next_sample_idx },
+        );
+        return;
+    }
 
-    log.debug("Recording [ {d:10} - {d:10} ]\n", .{ next_sample_idx, record_to_idx });
+    log.debug("Recording [ {d:10} - {d:10} ]", .{ next_sample_idx, record_to_idx });
 
     // Read the slice from the ring buffer and record it.
     const split_slice = try self.multi_ring_buffer.sliceBuffer(
@@ -193,12 +209,12 @@ fn maybeFinalizeRecording(self: *Self) !void {
     self.end_recording_on_sample = null;
 
     // Finalize the recording and call the callback with the recorded audio buffer.
-    var maybe_audio_buffer = self.finalize(finalize_after_idx, true) catch |err| {
+    const maybe_audio_buffer = self.finalize(finalize_after_idx, true) catch |err| {
         log.err("Failed to finalize recording: {any}", .{err});
         return err;
     };
 
-    if (maybe_audio_buffer) |*audio_buffer| {
+    if (maybe_audio_buffer) |audio_buffer| {
         self.recording_cb(self.recording_cb_ctx, audio_buffer);
     } else {
         log.err("Expected to capture segment, but none was returned", .{});
@@ -269,7 +285,7 @@ fn segmentToAudioBuffer(
         .n_channels = 1,
         .duration_seconds = duration_sec,
         .channel_pcm_buf = channel_pcm_buf,
-        .global_start_frame_number = segment.index,
+        .first_sample_number = segment.index,
     };
 
     return audio_buffer;

@@ -7,6 +7,13 @@ const SegmentWriter = @import("./SegmentWriter.zig");
 pub const Result = struct {
     segment: *const Segment,
     metadata: VADMetadata.Result,
+
+    pub fn wrapSegment(segment: *const Segment) Result {
+        return Result{
+            .segment = segment,
+            .metadata = .{},
+        };
+    }
 };
 
 pub const AudioConfig = struct {
@@ -281,12 +288,10 @@ pub fn rootSampleRateMultiplier(self: *const Self) f64 {
 }
 
 const IndexRange = struct {
-    /// **Inclusive**
     from: usize,
-    /// **Exclusive**
     to: usize,
 };
-/// Converts sample index number at the current step to root sample index (before resampling transformations)
+/// Converts sample index number at the current step to root sample index
 pub fn convertSampleIndexToRoot(self: *const Self, index: usize) IndexRange {
     const sr_mul = self.rootSampleRateMultiplier();
     const index_f: f64 = @floatFromInt(index);
@@ -294,6 +299,17 @@ pub fn convertSampleIndexToRoot(self: *const Self, index: usize) IndexRange {
     return IndexRange{
         .from = @intFromFloat(index_f / sr_mul),
         .to = @intFromFloat((index_f + 1) / sr_mul),
+    };
+}
+
+/// Converts sample index number at root to sample index at current step
+pub fn convertSampleIndexFromRoot(self: *const Self, index: usize) IndexRange {
+    const sr_mul = self.rootSampleRateMultiplier();
+    const index_f: f64 = @floatFromInt(index);
+
+    return IndexRange{
+        .from = @intFromFloat(index_f * sr_mul),
+        .to = @intFromFloat((index_f + 1) * sr_mul),
     };
 }
 
@@ -672,7 +688,13 @@ test "BufferedStep chain" {
     // std.debug.print("{d}\n", .{doubler_step.rootSampleRateMultiplier()});
 
     // test conversion of sample indices at final step to root indices
-    const sample_range_at_final_step = doubler_step.convertSampleIndexToRoot(3);
-    try std.testing.expectEqual(IndexRange{ .from = 12, .to = 16 }, sample_range_at_final_step);
-    // std.debug.print("{any}\n", .{sample_range_at_final_step});
+    try std.testing.expectEqual(
+        IndexRange{ .from = 12, .to = 16 },
+        doubler_step.convertSampleIndexToRoot(3),
+    );
+
+    try std.testing.expectEqual(
+        IndexRange{ .from = 4, .to = 4 },
+        doubler_step.convertSampleIndexFromRoot(16),
+    );
 }

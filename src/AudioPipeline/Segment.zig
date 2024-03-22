@@ -65,6 +65,14 @@ pub fn initWithCapacity(allocator: Allocator, n_channels: usize, init_length: us
     return self;
 }
 
+pub fn wrapChannelPcmBuf(index: u64, channel_pcm_buf: ReadOnlyChannelPCM) Self {
+    return Self{
+        .index = index,
+        .channel_pcm_buf = channel_pcm_buf,
+        .mem_ownership = .nothing,
+    };
+}
+
 /// Returns the PCM buffer with all write restrictions removed. Allows slicing and data modification.
 /// Checks whether the Segment owns the underlying samples.
 pub fn writablePCM(self: *Self) WritableChannelPCM {

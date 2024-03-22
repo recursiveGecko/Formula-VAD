@@ -154,7 +154,7 @@ pub fn main() !void {
         pipeline_config,
         AudioPipeline.Callbacks{
             .ctx = &process_loop,
-            .on_recording = &onOriginalRecording,
+            .on_recording = &onRecording,
         },
     );
     errdefer pipeline.deinit();
@@ -315,16 +315,12 @@ fn reportError(
     stdout_w.print("{s}\n", .{out_json}) catch unreachable;
 }
 
-fn onOriginalRecording(opaque_ctx: *anyopaque, audio_buffer: *const AudioBuffer) void {
-    const process_loop: *ProcessLoopState = alignedPtrCast(opaque_ctx, ProcessLoopState);
-    onRecording(process_loop, audio_buffer, .original);
-}
-
 fn onRecording(
-    process_loop: *ProcessLoopState,
-    audio_buffer: *const AudioBuffer,
-    rec_type: enum { original, denoised },
+    process_loop_opaque: *anyopaque,
+    recorder_name: []const u8,
+    audio_buffer: AudioBuffer,
 ) void {
+    const process_loop: *ProcessLoopState = @ptrCast(@alignCast(process_loop_opaque));
     const arena_alloc = process_loop.callback_arena.allocator();
     defer _ = process_loop.callback_arena.reset(.retain_capacity);
 
@@ -333,7 +329,7 @@ fn onRecording(
     const filename = fmt.allocPrint(
         arena_alloc,
         "{d}-{s}.wav",
-        .{ audio_buffer.global_start_frame_number.?, @tagName(rec_type) },
+        .{ audio_buffer.first_sample_number.?, recorder_name },
     ) catch unreachable;
 
     const path = fs.path.resolve(arena_alloc, &.{ out_dir, filename }) catch |err| {
@@ -362,12 +358,12 @@ fn onRecording(
     // Only notify the parent process of original recordings,
     // or find a way to notify it about both original and denoised recordings
     // in a single message
-    if (rec_type != .original) return;
+    if (!std.mem.eql(u8, recorder_name, "rec-original")) return;
 
     const duration_ms: u64 = @intFromFloat(audio_buffer.duration_seconds * 1000);
 
     const samples_since_correlation =
-        @as(i64, @intCast(audio_buffer.global_start_frame_number.?)) -
+        @as(i64, @intCast(audio_buffer.first_sample_number.?)) -
         @as(i64, @intCast(process_loop.correlated_sample_index));
 
     const ms_since_correlation = @divTrunc(
@@ -400,10 +396,6 @@ fn onRecording(
     };
 
     stdout_w.print("{s}\n", .{out_json}) catch unreachable;
-}
-
-fn alignedPtrCast(opaque_ptr: *anyopaque, comptime T: type) *T {
-    return @ptrCast(@alignCast(opaque_ptr));
 }
 
 test {

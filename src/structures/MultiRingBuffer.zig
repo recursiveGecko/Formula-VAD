@@ -94,8 +94,13 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
             self.split_slice_pool.deinit();
         }
 
-        pub fn writeIndex(self: *const Self) usize {
+        /// RELATIVE write index
+        fn writeHead(self: *const Self) usize {
             return self.total_write_count % self.capacity;
+        }
+
+        pub fn totalWriteCount(self: *const Self) usize {
+            return self.total_write_count;
         }
 
         /// Writes multiple channels of data to the ring buffer.
@@ -152,7 +157,7 @@ pub fn MultiRingBuffer(comptime TData: type, comptime TCounter: type) type {
                 assert(source_channels[channel_idx].len == n_total_src_points);
             }
 
-            const dst_write_idx = self.writeIndex();
+            const dst_write_idx = self.writeHead();
             // Number of elements remaining until we reach the end of the ring buffer
             // and need to start writing from the start again
             const dst_distance_to_end = self.capacity - dst_write_idx;

@@ -12,16 +12,8 @@ const SplitSegments = struct {
 
 pub fn splitSliceToSegments(split_slice: *const AudioMRB.SplitSlice) SplitSegments {
     return .{
-        .first = Segment{
-            .index = split_slice.first_index,
-            .channel_pcm_buf = split_slice.first,
-            .mem_ownership = .nothing,
-        },
-        .second = Segment{
-            .index = split_slice.second_index,
-            .channel_pcm_buf = split_slice.second,
-            .mem_ownership = .nothing,
-        },
+        .first = Segment.wrapChannelPcmBuf(split_slice.first_index, split_slice.first),
+        .second = Segment.wrapChannelPcmBuf(split_slice.second_index, split_slice.second),
     };
 }
 
@@ -32,7 +24,7 @@ const SplitBufferedSteps = struct {
 
 pub fn splitSegmentsToBufferedSteps(split_segments: *const SplitSegments) SplitBufferedSteps {
     return .{
-        .first = BufferedStep.Result{ .segment = &split_segments.first, .metadata = .{} },
-        .second = BufferedStep.Result{ .segment = &split_segments.second, .metadata = .{} },
+        .first = BufferedStep.Result.wrapSegment(split_segments.first),
+        .second = BufferedStep.Result.wrapSegment(split_segments.second),
     };
 }

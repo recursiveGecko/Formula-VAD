@@ -13,6 +13,7 @@ const BufferedStep = @import("./BufferedStep.zig");
 const BufferedNSNet2Denoiser = @import("./BufferedNSNet2Denoiser.zig");
 const BufferedDFNDenoiser = @import("./BufferedDFNDenoiser.zig");
 const BufferedMixer = @import("BufferedMixer.zig");
+const BufferedRecorder = @import("BufferedRecorder.zig");
 const audio_utils = @import("../audio_utils.zig");
 const types = @import("../types.zig");
 
@@ -42,9 +43,12 @@ sample_rate: usize,
 n_channels: usize,
 /// Number of samples VAD has read from the pipeline
 pipeline_read_count: u64 = 0,
-buffered_mixer: *BufferedMixer,
-buffered_denoiser: *DenoiserModule,
-buffered_fft: *BufferedFFT,
+b_first_step: *BufferedStep,
+b_original_recorder: *BufferedRecorder,
+b_mixer: *BufferedMixer,
+b_denoiser: *DenoiserModule,
+b_denoiser_recorder: *BufferedRecorder,
+b_fft: *BufferedFFT,
 // Speech state machine
 vad_machine: VADMachine,
 alt_vad_machines: ?[]VADMachine,
@@ -68,36 +72,59 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !*Self {
         .config = config,
         .n_channels = n_channels,
         .sample_rate = sample_rate,
-        .buffered_mixer = undefined,
-        .buffered_denoiser = undefined,
-        .buffered_fft = undefined,
+        .b_first_step = undefined,
+        .b_original_recorder = undefined,
+        .b_mixer = undefined,
+        .b_denoiser = undefined,
+        .b_denoiser_recorder = undefined,
+        .b_fft = undefined,
         .vad_machine = undefined,
         .alt_vad_machines = null,
     };
 
-    self.buffered_mixer = try BufferedMixer.init(allocator, "mixer", 48000, 2, true);
-    errdefer self.buffered_mixer.deinit();
+    self.b_original_recorder = try BufferedRecorder.init(
+        allocator,
+        "rec-original",
+        pipeline.recording_coordinator,
+        sample_rate,
+        n_channels,
+        true,
+    );
+    errdefer self.b_original_recorder.deinit();
 
-    self.buffered_denoiser = try DenoiserModule.init(
+    self.b_mixer = try BufferedMixer.init(allocator, "mixer", sample_rate, 2, true);
+    errdefer self.b_mixer.deinit();
+
+    self.b_denoiser = try DenoiserModule.init(
         allocator,
         "denoiser",
         config.denoiser_model_path,
-        self.buffered_mixer.audio_config.out_sample_rate,
+        self.b_mixer.audio_config.out_sample_rate,
         true,
     );
-    errdefer self.buffered_denoiser.deinit();
+    errdefer self.b_denoiser.deinit();
 
-    self.buffered_fft = try BufferedFFT.init(
+    self.b_denoiser_recorder = try BufferedRecorder.init(
+        allocator,
+        "rec-denoiser",
+        pipeline.recording_coordinator,
+        self.b_denoiser.audio_config.out_sample_rate,
+        self.b_denoiser.audio_config.out_channels,
+        true,
+    );
+    errdefer self.b_denoiser_recorder.deinit();
+
+    self.b_fft = try BufferedFFT.init(
         allocator,
         "fft",
         .{
             .fft_size = config.fft_size,
             .hop_size = config.fft_size,
-            .sample_rate = self.buffered_denoiser.audio_config.out_sample_rate,
+            .sample_rate = self.b_denoiser.audio_config.out_sample_rate,
         },
         self,
     );
-    errdefer self.buffered_fft.deinit();
+    errdefer self.b_fft.deinit();
 
     self.vad_machine = try VADMachine.init(allocator, config.vad_machine_config, self);
 
@@ -116,8 +143,11 @@ pub fn init(pipeline: *AudioPipeline, config: Config) !*Self {
     }
 
     // Wire the steps
-    try self.buffered_mixer.step.connectTo(self.buffered_denoiser.step);
-    try self.buffered_denoiser.step.connectTo(self.buffered_fft.step);
+    self.b_first_step = self.b_original_recorder.step;
+    try self.b_original_recorder.step.connectTo(self.b_mixer.step);
+    try self.b_mixer.step.connectTo(self.b_denoiser.step);
+    try self.b_denoiser.step.connectTo(self.b_denoiser_recorder.step);
+    try self.b_denoiser_recorder.step.connectTo(self.b_fft.step);
 
     return self;
 }
@@ -128,25 +158,17 @@ pub fn deinit(self: *Self) void {
         self.allocator.free(alt_vad);
     }
     self.vad_machine.deinit();
-    self.buffered_mixer.deinit();
-    self.buffered_denoiser.deinit();
-    self.buffered_fft.deinit();
+    self.b_original_recorder.deinit();
+    self.b_mixer.deinit();
+    self.b_denoiser.deinit();
+    self.b_denoiser_recorder.deinit();
+    self.b_fft.deinit();
     self.allocator.destroy(self);
 }
 
-pub fn run(self: *Self) !void {
-    const from = self.pipeline_read_count;
-    const to = self.pipeline.totalWriteCount();
-    self.pipeline_read_count = to;
-
-    const split_slice = try self.pipeline.readRingBuffer(from, to);
-    defer split_slice.release();
-
-    const split_segments = types.splitSliceToSegments(split_slice);
-    const split_buffered_steps = types.splitSegmentsToBufferedSteps(&split_segments);
-
-    try self.buffered_mixer.step.write(&split_buffered_steps.first);
-    try self.buffered_mixer.step.write(&split_buffered_steps.second);
+pub fn write(self: *Self, segment: *const Segment) !void {
+    const input = BufferedStep.Result.wrapSegment(segment);
+    try self.b_first_step.write(&input);
 }
 
 pub fn onFFTResult(
@@ -171,15 +193,15 @@ fn handleFFTResult(
     switch (vad_result.recording_state) {
         .started => {
             log.info("Starting recording at: {d}", .{vad_result.sample_number});
-            try self.pipeline.startRecording(vad_result.sample_number);
+            self.pipeline.startRecording(vad_result.sample_number);
         },
         .completed => {
             log.info("Completing recording at: {d}", .{vad_result.sample_number});
-            try self.pipeline.endRecording(vad_result.sample_number, true);
+            self.pipeline.endRecording(vad_result.sample_number, true);
         },
         .aborted => {
             log.info("Aborting recording at: {d}", .{vad_result.sample_number});
-            try self.pipeline.endRecording(vad_result.sample_number, false);
+            self.pipeline.endRecording(vad_result.sample_number, false);
         },
         .none => {},
     }
