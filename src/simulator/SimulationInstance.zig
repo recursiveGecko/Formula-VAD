@@ -17,6 +17,14 @@ const fs = std.fs;
 const Self = @This();
 const SimulationInstance = @This();
 
+pub const Opts = struct {
+    base_path: []const u8,
+    output_dir: ?[]const u8,
+    instance_json: SimulationInstanceJSON,
+    sim_config: DynamicSimConfig,
+    cli_args: simulator.CLIArgs,
+};
+
 // Wraps the pipeline context that is required for AudioPipeline callbacks
 const PipelineContext = struct {
     sim_instance: *SimulationInstance,
@@ -70,27 +78,25 @@ reference_segments: []const Evaluator.SpeechSegment,
 evaluator: ?Evaluator = null,
 sim_config: DynamicSimConfig,
 main_thread_allocator: Allocator,
+cli_args: simulator.CLIArgs,
 
 pub fn init(
     allocator: Allocator,
-    base_path: []const u8,
-    output_dir: ?[]const u8,
-    instance_json: SimulationInstanceJSON,
-    sim_config: DynamicSimConfig,
+    opts: Opts,
 ) !Self {
-    const name = try allocator.dupe(u8, instance_json.name);
+    const name = try allocator.dupe(u8, opts.instance_json.name);
     errdefer allocator.free(name);
 
-    const audio_path = try fs.path.resolve(allocator, &.{ base_path, instance_json.audio_path });
+    const audio_path = try fs.path.resolve(allocator, &.{ opts.base_path, opts.instance_json.audio_path });
     defer allocator.free(audio_path);
 
-    const ref_path = try fs.path.resolve(allocator, &.{ base_path, instance_json.ref_path });
+    const ref_path = try fs.path.resolve(allocator, &.{ opts.base_path, opts.instance_json.ref_path });
     defer allocator.free(ref_path);
 
     const audio_source = try allocator.create(AudioSource);
     errdefer allocator.destroy(audio_source);
 
-    if (sim_config.preload_audio) {
+    if (opts.sim_config.preload_audio) {
         const audio_buffer = try AudioBuffer.loadFromFile(allocator, audio_path);
         audio_source.* = AudioSource{ .buffer = audio_buffer };
     } else {
@@ -103,12 +109,13 @@ pub fn init(
 
     return Self{
         .name = name,
-        .output_dir = output_dir,
+        .output_dir = opts.output_dir,
         .audio_source = audio_source,
         .reference_segments = ref_segments,
         .evaluator = null,
         .main_thread_allocator = allocator,
-        .sim_config = sim_config,
+        .sim_config = opts.sim_config,
+        .cli_args = opts.cli_args,
     };
 }
 
@@ -155,6 +162,7 @@ fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]AudioP
             .sample_rate = audio.sampleRate(),
             .n_channels = audio.nChannels(),
             .vad_config = self.sim_config.vad_config,
+            .record = self.cli_args.record,
             // .skip_processing = true,
         },
         pipeline_ctx.toPipelineCallbacks(),

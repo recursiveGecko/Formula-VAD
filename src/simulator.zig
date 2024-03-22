@@ -69,9 +69,15 @@ pub const SimulationInstanceJSON = struct {
     ref_path: []const u8,
 };
 
+pub const CLIArgs = struct {
+    plan_json_path: []const u8,
+    record: AudioPipeline.Config.RecordingTarget,
+};
+
 const cli_params = clap.parseParamsComptime(
     \\-h, --help             Display this help and exit
     \\-i, --input <str>      Simulation plan (path to JSON)
+    \\-r, --record <record>  Select which audio to record (all, original, none)
     \\
 );
 
@@ -84,8 +90,13 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var allocator = gpa.allocator();
 
+    const arg_parsers = .{
+        .str = clap.parsers.string,
+        .record = clap.parsers.enumeration(AudioPipeline.Config.RecordingTarget),
+    };
+
     var diag = clap.Diagnostic{};
-    var res = clap.parse(clap.Help, &cli_params, clap.parsers.default, .{
+    var res = clap.parse(clap.Help, &cli_params, arg_parsers, .{
         .allocator = allocator,
         .diagnostic = &diag,
     }) catch |err| {
@@ -105,10 +116,13 @@ pub fn main() !void {
         return;
     }
 
-    const plan_json_path = res.args.input.?;
+    const cli_args = CLIArgs{
+        .record = res.args.record orelse .none,
+        .plan_json_path = res.args.input.?,
+    };
 
     // Initialize and run the simulation
-    var simulation = initialize(allocator, plan_json_path) catch |err| {
+    var simulation = initialize(allocator, cli_args) catch |err| {
         try stderr_w.print("Failed to initialize simulation: {}\n", .{err});
         exit(1);
     };
@@ -137,7 +151,8 @@ pub fn main() !void {
     try std.fs.Dir.writeFile(fs.cwd(), report_path, report);
 }
 
-pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
+pub fn initialize(allocator: Allocator, cli_args: CLIArgs) !*Simulation {
+    const json_path = cli_args.plan_json_path;
     const base_path = fs.path.dirname(json_path) orelse ".";
 
     // Read and parse the simulation plan JSON
@@ -188,13 +203,15 @@ pub fn initialize(allocator: Allocator, json_path: []const u8) !*Simulation {
             break :val instance_out_dir;
         };
 
-        instances[i] = try SimulationInstance.init(
-            allocator,
-            base_path,
-            out_dir,
-            instance_json,
-            plan_json.value.config,
-        );
+        const opts = SimulationInstance.Opts{
+            .base_path = base_path,
+            .output_dir = out_dir,
+            .instance_json = instance_json,
+            .sim_config = plan_json.value.config,
+            .cli_args = cli_args,
+        };
+
+        instances[i] = try SimulationInstance.init(allocator, opts);
         instances_alloc += 1;
     }
 

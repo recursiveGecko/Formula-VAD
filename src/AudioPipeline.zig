@@ -37,11 +37,14 @@ pub const Config = struct {
         denoiser_model_path: ?[:0]const u8 = null,
     };
 
+    pub const RecordingTarget = enum { all, original, none };
+
     sample_rate: usize,
     n_channels: usize,
     buffer_length: ?usize = null,
     vad_config: VADConfig = .{},
     skip_processing: bool = false,
+    record: RecordingTarget,
 };
 
 pub const SpeechSegment = struct {
@@ -175,6 +178,15 @@ pub fn init(
     try self.b_mixer.step.connectTo(self.b_denoiser.step);
     try self.b_denoiser.step.connectTo(self.b_denoiser_recorder.step);
     try self.b_denoiser_recorder.step.connectTo(self.b_fft.step);
+
+    switch (config.record) {
+        .all => {},
+        .none => self.recording_coordinator.disableAll(),
+        .original => {
+            self.recording_coordinator.disableAll();
+            try self.recording_coordinator.enableOne(self.b_original_recorder);
+        },
+    }
 
     return self;
 }

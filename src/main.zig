@@ -139,6 +139,10 @@ pub fn main() !void {
         .vad_config = AudioPipeline.Config.VADConfig{
             .denoiser_model_path = denoiser_model_path,
         },
+        // Only notify the parent process of original recordings,
+        // or find a way to notify it about both original and denoised recordings
+        // in a single message
+        .record = .original,
     };
 
     var process_loop = ProcessLoopState{
@@ -353,11 +357,6 @@ fn onRecording(
         reportError(arena_alloc, msg, false);
         return;
     };
-
-    // Only notify the parent process of original recordings,
-    // or find a way to notify it about both original and denoised recordings
-    // in a single message
-    if (!std.mem.eql(u8, recorder_name, "rec-original")) return;
 
     const duration_ms: u64 = @intFromFloat(audio_buffer.duration_seconds * 1000);
 
