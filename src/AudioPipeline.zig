@@ -180,12 +180,9 @@ pub fn init(
     try self.b_denoiser_recorder.step.connectTo(self.b_fft.step);
 
     switch (config.record) {
-        .all => {},
-        .none => self.recording_coordinator.disableAll(),
-        .original => {
-            self.recording_coordinator.disableAll();
-            try self.recording_coordinator.enableOne(self.b_original_recorder);
-        },
+        .all => self.recording_coordinator.enableAll(),
+        .original => try self.recording_coordinator.enableOne(self.b_original_recorder),
+        .none => {},
     }
 
     return self;
@@ -237,19 +234,20 @@ fn handleFFTResult(
     _ = buffered_step_output;
 
     const vad_result = try self.vad_machine.run(fft_result);
+    const root_sample_number = self.b_fft.step.convertSampleIndexToRoot(vad_result.sample_number);
 
     switch (vad_result.recording_state) {
         .started => {
-            log.info("Starting recording at: {d}", .{vad_result.sample_number});
-            self.recording_coordinator.start(vad_result.sample_number);
+            log.info("Starting recording at: {d}", .{root_sample_number.from});
+            self.recording_coordinator.start(root_sample_number.from);
         },
         .completed => {
-            log.info("Completing recording at: {d}", .{vad_result.sample_number});
-            self.recording_coordinator.stop(vad_result.sample_number, true);
+            log.info("Completing recording at: {d}", .{root_sample_number.to});
+            self.recording_coordinator.stop(root_sample_number.to, true);
         },
         .aborted => {
-            log.info("Aborting recording at: {d}", .{vad_result.sample_number});
-            self.recording_coordinator.stop(vad_result.sample_number, false);
+            log.info("Aborting recording at: {d}", .{root_sample_number.to});
+            self.recording_coordinator.stop(root_sample_number.to, false);
         },
         .none => {},
     }

@@ -13,11 +13,23 @@ pub const Registration = struct {
     pub const StopRecordingFn = fn (ctx: *anyopaque, sample_number: SampleIndex, keep: bool) void;
 
     name: []const u8,
-    is_disabled: bool = false,
+    is_disabled: bool = true,
     is_recording: bool = false,
     ctx: *anyopaque,
     start_fn: *const StartRecordingFn,
     stop_fn: *const StopRecordingFn,
+
+    pub fn disable(self: *Registration) void {
+        self.is_disabled = true;
+        if (self.is_recording) {
+            self.stop_fn(self.ctx, 0, false);
+            self.is_recording = false;
+        }
+    }
+
+    pub fn enable(self: *Registration) void {
+        self.is_disabled = false;
+    }
 };
 
 const RecorderMap = std.AutoHashMap(*anyopaque, Registration);
@@ -82,49 +94,38 @@ pub fn unregister(
 }
 
 pub fn disableAll(self: *Self) void {
+    log.info("Disabling all recorders.", .{});
     var it = self.recorders.iterator();
     while (it.next()) |item| {
         const recorder = item.value_ptr;
-
-        self.disableOne(recorder.ctx) catch |err| {
-            std.debug.panic("Unable to disable all recorders, failed on recorder: {s} with {any}", .{ recorder.name, err });
-        };
+        recorder.disable();
     }
 }
 
 pub fn disableOne(self: *Self, ctx: *anyopaque) !void {
     const maybe_recorder = self.recorders.getPtr(ctx);
     if (maybe_recorder) |recorder| {
-        recorder.is_disabled = true;
-
         log.info("Disabling recorder: {s}", .{recorder.name});
-
-        if (recorder.is_recording) {
-            recorder.stop_fn(recorder.ctx, 0, false);
-            recorder.is_recording = false;
-        }
+        recorder.disable();
     } else {
         return error.UnknownRecorder;
     }
 }
 
 pub fn enableAll(self: *Self) void {
+    log.info("Enabling all recorders.", .{});
     var it = self.recorders.iterator();
     while (it.next()) |item| {
         const recorder = item.value_ptr;
-
-        self.enableOne(recorder.ctx) catch |err| {
-            std.debug.panic("Unable to enable all recorders, failed on recorder: {s} with {any}", .{ recorder.name, err });
-        };
+        recorder.enable();
     }
 }
 
 pub fn enableOne(self: *Self, ctx: *anyopaque) !void {
     const maybe_recorder = self.recorders.getPtr(ctx);
     if (maybe_recorder) |recorder| {
-        recorder.is_disabled = false;
-
         log.info("Enabling recorder: {s}", .{recorder.name});
+        recorder.enable();
     } else {
         return error.UnknownRecorder;
     }
