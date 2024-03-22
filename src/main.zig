@@ -4,7 +4,6 @@ const fmt = std.fmt;
 const json = std.json;
 const Thread = std.Thread;
 const Allocator = std.mem.Allocator;
-const VADPipeline = @import("./AudioPipeline/VADPipeline.zig");
 const AudioPipeline = @import("./AudioPipeline.zig");
 const AudioBuffer = @import("./audio_utils/AudioBuffer.zig");
 const uuid = @import("./uuid.zig");
@@ -137,7 +136,7 @@ pub fn main() !void {
         .sample_rate = 48000,
         .n_channels = 2,
         .buffer_length = 48000 * 10,
-        .vad_config = VADPipeline.Config{
+        .vad_config = AudioPipeline.Config.VADConfig{
             .denoiser_model_path = denoiser_model_path,
         },
     };

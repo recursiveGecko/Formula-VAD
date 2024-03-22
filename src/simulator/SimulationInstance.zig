@@ -6,7 +6,6 @@ const AudioPipeline = @import("../AudioPipeline.zig");
 const AudioFileStream = @import("../audio_utils/AudioFileStream.zig");
 const AudioBuffer = @import("../audio_utils/AudioBuffer.zig");
 const AudioSource = @import("../audio_utils/AudioSource.zig").AudioSource;
-const VADPipeline = @import("../AudioPipeline/VADPipeline.zig");
 const simulator = @import("../simulator.zig");
 const Evaluator = @import("../Evaluator.zig");
 const static_sim_config = simulator.static_sim_config;
@@ -145,7 +144,7 @@ pub fn run(self: *Self) !void {
     try self.storeResult(vad_segments);
 }
 
-fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VADPipeline.SpeechSegment {
+fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]AudioPipeline.SpeechSegment {
     var pipeline_ctx = PipelineContext{
         .sim_instance = self,
     };
@@ -202,7 +201,7 @@ fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VADPip
         unreachable;
     }
 
-    const vad_segments = try pipeline.vad.vad_machine.vad_segments.toOwnedSlice();
+    const vad_segments = try pipeline.vad_machine.vad_segments.toOwnedSlice();
     errdefer allocator.free(vad_segments);
 
     return vad_segments;
@@ -210,7 +209,7 @@ fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]VADPip
 
 pub fn storeResult(
     self: *Self,
-    vad_segments: []VADPipeline.SpeechSegment,
+    vad_segments: []AudioPipeline.SpeechSegment,
 ) !void {
     var speech_segments = try self.main_thread_allocator.alloc(Evaluator.SpeechSegment, vad_segments.len);
     errdefer self.main_thread_allocator.free(speech_segments);

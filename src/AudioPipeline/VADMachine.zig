@@ -3,7 +3,7 @@ const log = std.log.scoped(.vad_sm);
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const RollingAverage = @import("../structures/RollingAverage.zig");
-const VADPipeline = @import("./VADPipeline.zig");
+const AudioPipeline = @import("../AudioPipeline.zig");
 const BufferedFFT = @import("./BufferedFFT.zig");
 
 const Self = @This();
@@ -65,12 +65,12 @@ channel_vol_ratio_sum: f32 = 0,
 channel_vol_ratio_count: usize = 0,
 vad_threshold_met_cumulative_sec: f32 = 0,
 /// End result - VAD segments
-vad_segments: std.ArrayList(VADPipeline.SpeechSegment),
+vad_segments: std.ArrayList(AudioPipeline.SpeechSegment),
 
-pub fn init(allocator: Allocator, config: Config, vad_pipeline: *const VADPipeline) !Self {
-    const sample_rate = vad_pipeline.sample_rate;
+pub fn init(allocator: Allocator, config: Config, pipeline_config: AudioPipeline.Config) !Self {
+    const sample_rate = pipeline_config.sample_rate;
     const sample_rate_f: f32 = @floatFromInt(sample_rate);
-    const fft_size = vad_pipeline.config.fft_size;
+    const fft_size = pipeline_config.vad_config.fft_size;
     const fft_size_f: f32 = @floatFromInt(fft_size);
 
     const eval_per_sec = sample_rate_f / fft_size_f;
@@ -99,7 +99,7 @@ pub fn init(allocator: Allocator, config: Config, vad_pipeline: *const VADPipeli
     );
     errdefer channel_vol_ratio.deinit();
 
-    var vad_segments = try std.ArrayList(VADPipeline.SpeechSegment).initCapacity(allocator, 100);
+    var vad_segments = try std.ArrayList(AudioPipeline.SpeechSegment).initCapacity(allocator, 100);
     errdefer vad_segments.deinit();
 
     const self = Self{
@@ -255,7 +255,7 @@ fn onSpeechEnd(self: *Self) !Result {
     const avg_channel_vol_ratio = self.channel_vol_ratio_sum / @as(f32, @floatFromInt(self.channel_vol_ratio_count));
 
     if (speech_duration_met) {
-        const segment = VADPipeline.SpeechSegment{
+        const segment = AudioPipeline.SpeechSegment{
             .sample_from = self.getOffsetRecordingStart(sample_from),
             .sample_to = self.getOffsetRecordingEnd(sample_to),
             .avg_channel_vol_ratio = avg_channel_vol_ratio,

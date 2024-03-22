@@ -6,7 +6,7 @@ const window_fn = @import("../audio_utils/window_fn.zig");
 const Segment = @import("./Segment.zig");
 const SegmentWriter = @import("./SegmentWriter.zig");
 const BufferedStep = @import("./BufferedStep.zig");
-const VADPipeline = @import("./VADPipeline.zig");
+const AudioPipeline = @import("../AudioPipeline.zig");
 const VADMetadata = @import("./VADMetadata.zig");
 
 const Self = @This();
@@ -54,7 +54,7 @@ allocator: Allocator,
 config: Config,
 fft_instance: *FFT,
 audio_config: BufferedStep.AudioConfig,
-vad_pipeline: *VADPipeline,
+pipeline: *AudioPipeline,
 step: *BufferedStep,
 // window and its normalization factor
 window: []const f32,
@@ -67,7 +67,7 @@ pub fn init(
     allocator: Allocator,
     name: []const u8,
     config: Config,
-    vad_pipeline: *VADPipeline,
+    pipeline: *AudioPipeline,
 ) !*Self {
     var self = try allocator.create(Self);
     errdefer allocator.destroy(self);
@@ -103,7 +103,7 @@ pub fn init(
         .window = window,
         .complex_buffer = complex_buffer,
         .norm_factor = norm_factor,
-        .vad_pipeline = vad_pipeline,
+        .pipeline = pipeline,
         .audio_config = .{
             .buffer_size = config.fft_size,
             .in_channels = 1,
@@ -154,7 +154,7 @@ pub fn process(
     }
     self.temp_result.vad_metadata = input.metadata;
     self.temp_result.index = input.segment.index;
-    self.vad_pipeline.onFFTResult(input, &self.temp_result);
+    self.pipeline.onFFTResult(input, &self.temp_result);
 
     return input;
 }
