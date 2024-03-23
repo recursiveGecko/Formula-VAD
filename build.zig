@@ -2,6 +2,7 @@ const std = @import("std");
 const Build = std.Build;
 
 const CommonOptions = struct {
+    build: *Build,
     target: Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     clap_dep: *Build.Dependency,
@@ -28,6 +29,7 @@ pub fn build(b: *Build) !void {
         .optimize = optimize,
     });
     const common_options = CommonOptions{
+        .build = b,
         .target = target,
         .optimize = optimize,
         .clap_dep = clap_dep,
@@ -60,11 +62,11 @@ pub fn build(b: *Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    try addClap(b, main_exe, common_options);
-    try addSndfile(b, main_exe, common_options);
-    try addKissFFT(b, main_exe, common_options);
-    try addOnnx(b, main_exe, common_options);
-    try addDeepFilterNet(b, main_exe, common_options);
+    try addClap(main_exe, common_options);
+    try addSndfile(main_exe, common_options);
+    try addKissFFT(main_exe, common_options);
+    try addOnnx(main_exe, common_options);
+    try addDeepFilterNet(main_exe, common_options);
     try setRPath(main_exe);
 
     const main_exe_install = b.addInstallArtifact(main_exe, .{});
@@ -90,11 +92,11 @@ pub fn build(b: *Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    try addClap(b, test_exe, common_options);
-    try addSndfile(b, test_exe, common_options);
-    try addDeepFilterNet(b, test_exe, common_options);
-    try addKissFFT(b, test_exe, common_options);
-    try addOnnx(b, test_exe, common_options);
+    try addClap(test_exe, common_options);
+    try addSndfile(test_exe, common_options);
+    try addDeepFilterNet(test_exe, common_options);
+    try addKissFFT(test_exe, common_options);
+    try addOnnx(test_exe, common_options);
 
     const test_run_artifact = b.addRunArtifact(test_exe);
     const test_run_step = b.step("test", "Run unit tests");
@@ -109,7 +111,7 @@ pub fn build(b: *Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    try addClap(b, eval_exe, common_options);
+    try addClap(eval_exe, common_options);
     try setRPath(eval_exe);
 
     const eval_exe_install = b.addInstallArtifact(eval_exe, .{});
@@ -132,11 +134,11 @@ pub fn build(b: *Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    try addClap(b, sim_exe, common_options);
-    try addSndfile(b, sim_exe, common_options);
-    try addKissFFT(b, sim_exe, common_options);
-    try addOnnx(b, sim_exe, common_options);
-    try addDeepFilterNet(b, sim_exe, common_options);
+    try addClap(sim_exe, common_options);
+    try addSndfile(sim_exe, common_options);
+    try addKissFFT(sim_exe, common_options);
+    try addOnnx(sim_exe, common_options);
+    try addDeepFilterNet(sim_exe, common_options);
     try setRPath(sim_exe);
 
     const sim_exe_install = b.addInstallArtifact(sim_exe, .{});
@@ -158,7 +160,7 @@ fn setRPath(exe: *Build.Step.Compile) !void {
 }
 
 var kiss_fft_lib: ?*Build.Step.Compile = null;
-fn addKissFFT(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void {
+fn addKissFFT(exe: *Build.Step.Compile, options: CommonOptions) !void {
     const Pair = [2][]const u8;
     const macros: []const Pair = &.{
         .{ "kiss_fft_scalar", "float" },
@@ -173,7 +175,7 @@ fn addKissFFT(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void
             "kiss_fftr.c",
         };
 
-        const lib = b.addStaticLibrary(.{
+        const lib = options.build.addStaticLibrary(.{
             .name = "kissfft",
             .optimize = options.optimize,
             .target = options.target,
@@ -197,9 +199,8 @@ fn addKissFFT(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void
     exe.linkLibrary(kiss_fft_lib.?);
 }
 
-fn addDeepFilterNet(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void {
-    _ = b; // autofix
-    _ = options; // autofix
+fn addDeepFilterNet(exe: *Build.Step.Compile, options: CommonOptions) !void {
+    _ = options;
     exe.addIncludePath(.{ .path = "tmp/libdf/include" });
 
     // exe.addObjectFile(.{ .path = "tmp/libdf/lib/libdeepfilter.a" });
@@ -212,18 +213,15 @@ fn addDeepFilterNet(b: *Build, exe: *Build.Step.Compile, options: CommonOptions)
     exe.linkLibC();
 }
 
-fn addSndfile(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void {
+fn addSndfile(exe: *Build.Step.Compile, options: CommonOptions) !void {
     _ = options;
-    _ = b;
     exe.linkSystemLibrary("sndfile");
 }
 
-fn addClap(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void {
-    _ = b;
+fn addClap(exe: *Build.Step.Compile, options: CommonOptions) !void {
     exe.root_module.addImport("clap", options.clap_dep.module("clap"));
 }
 
-fn addOnnx(b: *Build, exe: *Build.Step.Compile, options: CommonOptions) !void {
-    _ = b;
+fn addOnnx(exe: *Build.Step.Compile, options: CommonOptions) !void {
     exe.root_module.addImport("onnxruntime", options.onnx_dep.module("zig-onnxruntime"));
 }
