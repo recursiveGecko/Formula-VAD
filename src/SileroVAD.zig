@@ -3,11 +3,6 @@ const Allocator = std.mem.Allocator;
 const onnx = @import("onnxruntime");
 const resample = @import("audio_utils/resample.zig");
 
-const on_threshold: f32 = 0.5;
-const off_threshold: f32 = on_threshold - 0.15;
-const min_speech_duration_ms: f32 = 1000;
-const max_silence_between_speech_ms: f32 = 1500;
-
 // Hard-coded sample rate, this is what the model needs
 const model_sample_rate = 16000;
 // This is defined in the original repo, the model works best
@@ -16,19 +11,7 @@ const model_sample_rate = 16000;
 // const window_size_samples: usize = 1024; // 64ms
 const window_size_samples: usize = 512; // 32ms
 
-pub const Result = union(enum) {
-    ok: struct {},
-    start_speech: struct {
-        start_sample: usize,
-    },
-    end_speech: struct {
-        end_sample: usize,
-    },
-};
-
 const Self = @This();
-
-const Status = enum { closed, opening, open, closing };
 
 allocator: std.mem.Allocator,
 onnx_instance: *onnx.OnnxInstance,
@@ -41,10 +24,6 @@ c: []f32,
 vad: []f32,
 hn: []f32,
 cn: []f32,
-start_sample: ?usize = null,
-end_sample: ?usize = null,
-status: Status = .closed,
-awaiting_close: bool = false,
 
 pub fn init(
     allocator: Allocator,
@@ -196,7 +175,7 @@ pub fn getChunkSizeForSR(in_sample_rate: usize) usize {
     return window_size_samples * downsample_rate;
 }
 
-pub fn runVAD(self: *Self, samples: []const f32, first_sample_index: usize) !Result {
+pub fn runVAD(self: *Self, samples: []const f32) !f32 {
     const downsample_rate = resample.calcDownsampleRate(self.in_sample_rate, model_sample_rate);
     resample.downsampleAudio(samples, self.pcm, downsample_rate);
 
@@ -209,80 +188,5 @@ pub fn runVAD(self: *Self, samples: []const f32, first_sample_index: usize) !Res
     @memcpy(self.h, self.hn);
     @memcpy(self.c, self.cn);
 
-    const last_sample_index = first_sample_index + samples.len() - 1;
-
-    switch (self.status) {
-        .closed => {
-            if (vad >= on_threshold) {
-                // 1. Start opening sequence
-                self.start_sample = first_sample_index;
-                self.status = .opening;
-            }
-        },
-        .opening => {
-            const speech_duration_samples_f: f32 = @floatFromInt(last_sample_index - self.start_sample.?);
-            const samples_per_ms = @as(f32, @floatFromInt(self.in_sample_rate)) / 1000;
-            const speech_duration_ms = speech_duration_samples_f / samples_per_ms;
-
-            // std.debug.print("{any} - {d:.2} - {d:.1}\n", .{ self.status, vad, speech_duration_ms });
-
-            if (vad < on_threshold) {
-                self.status = .closing;
-                self.end_sample = last_sample_index;
-            }
-
-            if (speech_duration_ms >= min_speech_duration_ms) {
-                self.status = .open;
-                self.awaiting_close = true;
-
-                return Result{
-                    .start_speech = .{
-                        .start_sample = self.start_sample.?,
-                    },
-                };
-            }
-        },
-        .open => {
-            // std.debug.print("{any} - {d:.2}\n", .{ self.status, vad });
-            if (vad < off_threshold) {
-                self.end_sample = last_sample_index;
-                self.status = .closing;
-            }
-        },
-        .closing => {
-            const threshold_to_reopen = if (self.awaiting_close) off_threshold else on_threshold;
-
-            if (vad >= threshold_to_reopen) {
-                // speech resumed
-                self.status = if (self.awaiting_close) .open else .opening;
-                self.end_sample = null;
-                return .{ .ok = .{} };
-            }
-
-            // silence since last speech
-            const silence_since_speech_samples_f: f32 = @floatFromInt(last_sample_index - self.end_sample.?);
-            const samples_per_ms = @as(f32, @floatFromInt(self.in_sample_rate)) / 1000;
-            const silence_duration_ms = 1000 * silence_since_speech_samples_f / samples_per_ms;
-
-            if (silence_duration_ms >= max_silence_between_speech_ms) {
-                const end_sample = self.end_sample.?;
-                self.end_sample = null;
-                self.status = .closed;
-
-                if (self.awaiting_close) {
-                    self.awaiting_close = false;
-
-                    return Result{
-                        .end_speech = .{
-                            .end_sample = end_sample,
-                        },
-                    };
-                } else {
-                    // intentionally blank, VAD was "opening" but didn't meet the criteria
-                }
-            }
-        },
-    }
-
-    return Result{ .ok = .{} };
+    return vad;
 }

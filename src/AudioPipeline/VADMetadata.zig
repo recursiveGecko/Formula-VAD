@@ -6,12 +6,15 @@ pub const Result = struct {
     volume_ratio: ?f32 = null,
     volume_min: ?f32 = null,
     volume_max: ?f32 = null,
+    silero_vad: ?f32 = null,
 };
 
 volume_ratio_sum: ?f32 = null,
 volume_ratio_weight: ?f32 = null,
 volume_min: ?f32 = null,
 volume_max: ?f32 = null,
+silero_vad_sum: ?f32 = null,
+silero_vad_weight: ?f32 = null,
 
 pub fn toResult(self: *Self) Result {
     var data = Result{};
@@ -21,6 +24,10 @@ pub fn toResult(self: *Self) Result {
 
     if (self.volume_ratio_sum != null) {
         data.volume_ratio = self.volume_ratio_sum.? / self.volume_ratio_weight.?;
+    }
+
+    if (self.silero_vad_sum != null) {
+        data.silero_vad = self.silero_vad_sum.? / self.silero_vad_weight.?;
     }
 
     return data;
@@ -35,6 +42,7 @@ pub fn push(self: *Self, values: anytype, weight_any: anytype) void {
     const new_volume_ratio = getValueOrNull(f32, values, "volume_ratio");
     const new_volume_min = getValueOrNull(f32, values, "volume_min");
     const new_volume_max = getValueOrNull(f32, values, "volume_max");
+    const new_silero_vad = getValueOrNull(f32, values, "silero_vad");
 
     if (new_volume_ratio) |new_val| {
         if (self.volume_ratio_sum == null) {
@@ -56,6 +64,16 @@ pub fn push(self: *Self, values: anytype, weight_any: anytype) void {
         if (self.volume_max == null or new_val > self.volume_max.?) {
             self.volume_max = new_val;
         }
+    }
+
+    if (new_silero_vad) |new_val| {
+        if (self.silero_vad_sum == null) {
+            self.silero_vad_sum = 0.0;
+            self.silero_vad_weight = 0.0;
+        }
+
+        self.silero_vad_sum.? += new_val * weight;
+        self.silero_vad_weight.? += weight;
     }
 }
 

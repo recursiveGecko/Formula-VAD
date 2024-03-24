@@ -8,16 +8,16 @@ const AudioMRB = @import("./types.zig").AudioMRB;
 const AudioBuffer = @import("./audio_utils/AudioBuffer.zig");
 const RecordingCoordinator = @import("RecordingCoordinator.zig");
 const VADMachine = @import("./AudioPipeline/VADMachine.zig");
+const SileroVADMachine = @import("./AudioPipeline/SileroVADMachine.zig");
 const BufferedStep = @import("./AudioPipeline/BufferedStep.zig");
 const BufferedNSNet2Denoiser = @import("./AudioPipeline/BufferedNSNet2Denoiser.zig");
 const BufferedDFNDenoiser = @import("./AudioPipeline/BufferedDFNDenoiser.zig");
 const BufferedMixer = @import("./AudioPipeline/BufferedMixer.zig");
 const BufferedFFT = @import("./AudioPipeline/BufferedFFT.zig");
 const BufferedRecorder = @import("./AudioPipeline/BufferedRecorder.zig");
+const BufferedSileroVAD = @import("./AudioPipeline/BufferedSileroVAD.zig");
 
 const Self = @This();
-
-const DenoiserModule = BufferedDFNDenoiser;
 
 pub const Callbacks = struct {
     ctx: *anyopaque,
@@ -32,8 +32,6 @@ pub const Config = struct {
     pub const VADConfig = struct {
         fft_size: usize = 1024,
         vad_machine_config: VADMachine.Config = .{},
-        // Alternative state machine configs for training
-        alt_vad_machine_configs: ?[]const VADMachine.Config = null,
         denoiser_model_path: ?[:0]const u8 = null,
     };
 
@@ -63,12 +61,12 @@ write_index: u64 = 0,
 b_first_step: *BufferedStep,
 b_original_recorder: *BufferedRecorder,
 b_mixer: *BufferedMixer,
-b_denoiser: *DenoiserModule,
+b_denoiser: *BufferedDFNDenoiser,
 b_denoiser_recorder: *BufferedRecorder,
 b_fft: *BufferedFFT,
+b_silero_vad: *BufferedSileroVAD,
 // Speech state machine
-vad_machine: VADMachine,
-alt_vad_machines: ?[]VADMachine,
+vad_machine: SileroVADMachine,
 
 pub fn init(
     allocator: Allocator,
@@ -95,8 +93,8 @@ pub fn init(
         .b_denoiser = undefined,
         .b_denoiser_recorder = undefined,
         .b_fft = undefined,
+        .b_silero_vad = undefined,
         .vad_machine = undefined,
-        .alt_vad_machines = null,
     };
 
     self.recording_coordinator = try RecordingCoordinator.init(allocator, self);
@@ -121,7 +119,7 @@ pub fn init(
     );
     errdefer self.b_mixer.deinit();
 
-    self.b_denoiser = try DenoiserModule.init(
+    self.b_denoiser = try BufferedDFNDenoiser.init(
         allocator,
         "denoiser",
         config.vad_config.denoiser_model_path,
@@ -134,11 +132,19 @@ pub fn init(
         allocator,
         "rec-denoiser",
         self.recording_coordinator,
-        self.b_denoiser.audio_config.out_sample_rate,
-        self.b_denoiser.audio_config.out_channels,
+        self.b_denoiser.step.audio_config.out_sample_rate,
+        self.b_denoiser.step.audio_config.out_channels,
         true,
     );
     errdefer self.b_denoiser_recorder.deinit();
+
+    self.b_silero_vad = try BufferedSileroVAD.init(
+        allocator,
+        "silero",
+        self.b_denoiser_recorder.step.audio_config.out_sample_rate,
+        true,
+    );
+    errdefer self.b_silero_vad.deinit();
 
     self.b_fft = try BufferedFFT.init(
         allocator,
@@ -146,38 +152,22 @@ pub fn init(
         .{
             .fft_size = config.vad_config.fft_size,
             .hop_size = config.vad_config.fft_size,
-            .sample_rate = self.b_denoiser_recorder.audio_config.out_sample_rate,
+            .sample_rate = self.b_silero_vad.step.audio_config.out_sample_rate,
         },
         self,
     );
     errdefer self.b_fft.deinit();
 
-    self.vad_machine = try VADMachine.init(allocator, config.vad_config.vad_machine_config, self.config);
-
-    if (config.vad_config.alt_vad_machine_configs) |alt_vad_configs| {
-        self.alt_vad_machines = try allocator.alloc(VADMachine, alt_vad_configs.len);
-        var n_alt_vad_initialized: usize = 0;
-        errdefer {
-            for (0..n_alt_vad_initialized) |i| self.alt_vad_machines.?[i].deinit();
-            allocator.free(self.alt_vad_machines.?);
-        }
-
-        for (0..alt_vad_configs.len) |i| {
-            self.alt_vad_machines.?[i] = try VADMachine.init(
-                allocator,
-                alt_vad_configs[i],
-                self.config,
-            );
-            n_alt_vad_initialized = i + 1;
-        }
-    }
+    // self.vad_machine = try VADMachine.init(allocator, config.vad_config.vad_machine_config, self.config);
+    self.vad_machine = try SileroVADMachine.init(allocator, self.b_fft.step);
 
     // Wire the steps
     self.b_first_step = self.b_original_recorder.step;
     try self.b_original_recorder.step.connectTo(self.b_mixer.step);
     try self.b_mixer.step.connectTo(self.b_denoiser.step);
     try self.b_denoiser.step.connectTo(self.b_denoiser_recorder.step);
-    try self.b_denoiser_recorder.step.connectTo(self.b_fft.step);
+    try self.b_denoiser_recorder.step.connectTo(self.b_silero_vad.step);
+    try self.b_silero_vad.step.connectTo(self.b_fft.step);
 
     switch (config.record) {
         .all => self.recording_coordinator.enableAll(),
@@ -189,16 +179,13 @@ pub fn init(
 }
 
 pub fn deinit(self: *Self) void {
-    if (self.alt_vad_machines) |alt_vad| {
-        for (alt_vad) |*v| v.deinit();
-        self.allocator.free(alt_vad);
-    }
     self.vad_machine.deinit();
     self.b_original_recorder.deinit();
     self.b_mixer.deinit();
     self.b_denoiser.deinit();
     self.b_denoiser_recorder.deinit();
     self.b_fft.deinit();
+    self.b_silero_vad.deinit();
     self.recording_coordinator.deinit();
     self.allocator.destroy(self);
 }
@@ -231,9 +218,7 @@ fn handleFFTResult(
     buffered_step_output: *const BufferedStep.Result,
     fft_result: *const BufferedFFT.FFTResult,
 ) !void {
-    _ = buffered_step_output;
-
-    const vad_result = try self.vad_machine.run(fft_result);
+    const vad_result = try self.vad_machine.run(buffered_step_output, fft_result);
     const root_sample_number = self.b_fft.step.convertSampleIndexToRoot(vad_result.sample_number);
 
     switch (vad_result.recording_state) {
@@ -250,13 +235,6 @@ fn handleFFTResult(
             self.recording_coordinator.stop(root_sample_number.to, false);
         },
         .none => {},
-    }
-
-    // Run the VAD machines for the alternative VADs (training)
-    if (self.alt_vad_machines) |alt_vads| {
-        for (alt_vads) |*alt_vad| {
-            _ = try alt_vad.run(fft_result);
-        }
     }
 }
 
