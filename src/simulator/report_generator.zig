@@ -10,21 +10,21 @@ const StatConfig = statistics.StatConfig;
 pub const definitions =
     \\P   (Positives):                            Total duration of real speech segments (from reference labels)
     \\TP  (True positives):                       Duration of correctly detected speech segments
-    \\FP  (False positives):                      Duration of incorrectly detected speech segments
-    \\FN  (False negatives):                      Duration of missed speech segments
+    \\FP  (False positives):                      Duration or number of incorrectly detected speech segments
+    \\FN  (False negatives):                      Duration or number of missed speech segments
     \\TPR (True positive rate, sensitivity):      Probability that VAD detects real speech.  = 1 - FNR
     \\PPV (Precision, Positive predictive value): Probability that detected speech is real.  = 1 - FDR
     \\FDR (False discovery rate):                 Probability that detected speech is false. = FP / (TP + FP) 
     \\FNR (False negative rate, miss rate):       Probability that VAD misses speech.        = FN / P 
 ;
 
-pub const table_header_fmt = "| {s: >30} | {s: >4} | {s: >4} | {s: >4} | {s: >4} | {s: >8} | {s: >8} |\n";
-pub const table_header_vals = .{ "Name", "P", "TP", "FP", "FN", "FDR (!)", "FNR (!)" };
+pub const table_header_fmt = "| {s: >30} | {s: >4} | {s: >4} | {s: >6} | {s: >6} | {s: >6} | {s: >6} | {s: >6} | {s: >6} |\n";
+pub const table_header_vals = .{ "Name", "P/s", "TP/s", "FP/s", "FN/s", "FP/#", "FN/#", "FDR/s", "FNR/s" };
 
-pub const table_separator_fmt = "| {s:->30} | {s:->4} | {s:->4} | {s:->4} | {s:->4} | {s:->8} | {s:->8} |\n";
-pub const table_separator_vals = .{ "", "", "", "", "", "", "" };
+pub const table_separator_fmt = "| {s:->30} | {s:->4} | {s:->4} | {s:->6} | {s:->6} | {s:->6} | {s:->6} | {s:->6} | {s:->6} |\n";
+pub const table_separator_vals = .{ "", "", "", "", "", "", "", "", "" };
 
-pub const table_row_fmt = "| {s: >30} | {d: >4.0} | {d: >4.0} | {d: >4.0} | {d: >4.0} | {d: >7.1}% | {d: >7.1}% |\n";
+pub const table_row_fmt = "| {s: >30} | {d: >4.0} | {d: >4.0} | {d: >6.0} | {d: >6.0} | {d: >6.0} | {d: >6.0} | {d: >5.1}% | {d: >5.1}% |\n";
 
 pub fn bufPrintSimulationReport(
     allocator: Allocator,
@@ -54,6 +54,8 @@ pub fn bufPrintSimulationReport(
                 stats.true_positives_sec,
                 stats.false_positives_sec,
                 stats.false_negatives_sec,
+                stats.false_positives_count,
+                stats.false_negatives_count,
                 stats.false_discovery_rate * 100,
                 stats.false_negative_rate * 100,
             });
@@ -66,13 +68,15 @@ pub fn bufPrintSimulationReport(
     const agg = statistics.aggregate(all_stats);
 
     try writer.print("\n=> Aggregate stats \n\n", .{});
-    try writer.print("Total speech duration  (P): {d: >7.1} sec\n", .{agg.total_positives_sec});
-    try writer.print("True positives        (TP): {d: >7.1} sec\n", .{agg.true_positives_sec});
-    try writer.print("False positives       (FP): {d: >7.1} sec\n", .{agg.false_positives_sec});
-    try writer.print("False negatives       (FN): {d: >7.1} sec", .{agg.false_negatives_sec});
-    try writer.print("    Min.    Avg.    Max. \n", .{});
+    try writer.print("Total speech duration  (P/s): {d: >7.1} sec\n", .{agg.total_positives_sec});
+    try writer.print("True positives        (TP/s): {d: >7.1} sec\n", .{agg.true_positives_sec});
+    try writer.print("False positives sec.  (FP/s): {d: >7.1} sec\n", .{agg.false_positives_sec});
+    try writer.print("False negatives sec.  (FN/s): {d: >7.1} sec\n", .{agg.false_negatives_sec});
+    try writer.print("False positives #     (FP/#): {d: >7.1} x\n", .{agg.false_positives_count});
+    try writer.print("False negatives #     (FN/#): {d: >7.1} x", .{agg.false_negatives_count});
+    try writer.print("      Min.    Avg.    Max. \n", .{});
     try writer.print(
-        "True positive rate   (TPR):   {d: >5.1}%  |  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% \n",
+        "True positive rate   (TPR/s):   {d: >5.1}%  |  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% \n",
         .{
             agg.true_positive_rate.overall * 100,
             agg.true_positive_rate.min * 100,
@@ -81,7 +85,7 @@ pub fn bufPrintSimulationReport(
         },
     );
     try writer.print(
-        "Precision            (PPV):   {d: >5.1}%  |  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% \n",
+        "Precision            (PPV/s):   {d: >5.1}%  |  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% \n",
         .{
             agg.precision.overall * 100,
             agg.precision.min * 100,
@@ -90,7 +94,7 @@ pub fn bufPrintSimulationReport(
         },
     );
     try writer.print(
-        "False discovery rate (FDR):   {d: >5.1}%  |  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% \n",
+        "False discovery rate (FDR/s):   {d: >5.1}%  |  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% \n",
         .{
             agg.false_discovery_rate.overall * 100,
             agg.false_discovery_rate.min * 100,
@@ -99,7 +103,7 @@ pub fn bufPrintSimulationReport(
         },
     );
     try writer.print(
-        "False negative rate  (FNR):   {d: >5.1}%  |  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% \n",
+        "False negative rate  (FNR/s):   {d: >5.1}%  |  {d: >5.1}% /{d: >5.1}% /{d: >5.1}% \n",
         .{
             agg.false_negative_rate.overall * 100,
             agg.false_negative_rate.min * 100,
@@ -107,8 +111,8 @@ pub fn bufPrintSimulationReport(
             agg.false_negative_rate.max * 100,
         },
     );
-    try writer.print("F-Score (β = {d: >5.2})       :   {d: >5.1}% \n", .{ agg.f_score_beta, agg.f_score * 100 });
-    try writer.print("Fowlkes-Mallows index     :   {d: >5.1}% \n", .{agg.fm_index * 100});
+    try writer.print("F-Score (β = {d: >5.2})         :   {d: >5.1}% \n", .{ agg.f_score_beta, agg.f_score * 100 });
+    try writer.print("Fowlkes-Mallows index       :   {d: >5.1}% \n", .{agg.fm_index * 100});
 
     return array_buf.toOwnedSlice();
 }

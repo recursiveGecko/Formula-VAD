@@ -6,14 +6,18 @@ const Evaluator = @import("../Evaluator.zig");
 const SpeechSegment = @import("SpeechSegment.zig");
 
 pub const SingleStats = struct {
-    /// P - Duration of real speech segments (from reference labels)
+    /// P(s) - Duration of real speech segments (from reference labels)
     total_positives_sec: f32 = 0,
-    /// TP - Duration of correctly detected speech segments
+    /// TP(s) - Duration of correctly detected speech segments
     true_positives_sec: f32 = 0,
-    /// FP - Duration of incorrectly detected speech segments
+    /// FP(s) - Duration of incorrectly detected speech segments
     false_positives_sec: f32 = 0,
-    /// FN - Duration of missed speech segments
+    /// FN(s) - Duration of missed speech segments
     false_negatives_sec: f32 = 0,
+    /// FP(#) - Number of missed speech segments (without overlap)
+    false_positives_count: u32 = 0,
+    /// FN(#) - Number of falsely detected speech segments (without overlap)
+    false_negatives_count: u32 = 0,
     /// TPR (sensitivity, recall) = TP / P
     /// Probability that VAD detects a real speech segment
     true_positive_rate: f32 = undefined,
@@ -44,14 +48,18 @@ pub const AggStat = struct {
 };
 
 pub const AggregateStats = struct {
-    /// P - Duration of real speech segments (from reference labels)
+    /// P(s) - Duration of real speech segments (from reference labels)
     total_positives_sec: f32 = 0,
-    /// TP - Duration of correctly detected speech segments
+    /// TP(s) - Duration of correctly detected speech segments
     true_positives_sec: f32 = 0,
-    /// FP - Duration of incorrectly detected speech segments
+    /// FP(s) - Duration of incorrectly detected speech segments
     false_positives_sec: f32 = 0,
-    /// FN - Duration of missed speech segments
+    /// FN(s) - Duration of missed speech segments
     false_negatives_sec: f32 = 0,
+    /// FP(#) - Number of missed speech segments (without overlap)
+    false_positives_count: u32 = 0,
+    /// FN(#) - Number of falsely detected speech segments (without overlap)
+    false_negatives_count: u32 = 0,
     /// TPR (sensitivity, recall) = TP / P
     /// Probability that VAD detects a speech segment
     true_positive_rate: AggStat = .{ .min = 2, .max = -2, .avg = undefined, .overall = undefined },
@@ -96,6 +104,10 @@ pub fn fromEvaluator(eval: Evaluator, config: StatConfig) !SingleStats {
             fp_debug = try std.fmt.allocPrint(eval.allocator, "FP:{d:.1}s", .{false_positives_sec});
         }
 
+        if (segment.opposite_segments.?.len == 0) {
+            stats.false_positives_count += 1;
+        }
+
         segment.debug_info = try std.fmt.allocPrint(eval.allocator, "{s}", .{fp_debug});
 
         stats.false_positives_sec += false_positives_sec;
@@ -118,6 +130,10 @@ pub fn fromEvaluator(eval: Evaluator, config: StatConfig) !SingleStats {
         if (ref_segment.duration() < config.ignore_shorter_than_sec) {
             ref_segment.debug_info = try std.fmt.allocPrint(eval.allocator, "short,{d:.1}s", .{ref_segment.duration()});
             continue;
+        }
+
+        if (ref_segment.opposite_segments.?.len == 0) {
+            stats.false_negatives_count += 1;
         }
 
         stats.false_negatives_sec += false_negative_sec;
@@ -149,6 +165,8 @@ pub fn aggregate(stats: []SingleStats) AggregateStats {
         agg.true_positives_sec += s.true_positives_sec;
         agg.false_positives_sec += s.false_positives_sec;
         agg.false_negatives_sec += s.false_negatives_sec;
+        agg.false_positives_count += s.false_positives_count;
+        agg.false_negatives_count += s.false_negatives_count;
 
         sum_true_positive_rate += s.true_positive_rate;
         if (s.true_positive_rate < agg.true_positive_rate.min)
