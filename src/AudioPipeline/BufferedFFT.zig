@@ -4,7 +4,6 @@ const Allocator = std.mem.Allocator;
 const FFT = @import("../FFT.zig");
 const window_fn = @import("../audio_utils/window_fn.zig");
 const Segment = @import("./Segment.zig");
-const SegmentWriter = @import("./SegmentWriter.zig");
 const BufferedStep = @import("./BufferedStep.zig");
 const AudioPipeline = @import("../AudioPipeline.zig");
 const VADMetadata = @import("./VADMetadata.zig");

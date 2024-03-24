@@ -2,7 +2,6 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const Segment = @import("./Segment.zig");
-const SegmentWriter = @import("./SegmentWriter.zig");
 const VADMetadata = @import("./VADMetadata.zig");
 const BufferedStep = @import("./BufferedStep.zig");
 const NSNet2 = @import("../NSNet2.zig");
