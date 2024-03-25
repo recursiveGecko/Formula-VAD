@@ -8,7 +8,7 @@ const DeepFilterNet = @import("../DeepFilterNet.zig");
 
 const Self = @This();
 
-const default_model_path = "tmp/libdf/DeepFilterNet3_onnx.tar.gz";
+const default_model_path = "data/DeepFilterNet3_onnx.tar.gz";
 
 allocator: Allocator,
 denoiser: DeepFilterNet,

@@ -261,12 +261,8 @@ test "simple leak test" {
         .{
             .n_channels = 2,
             .sample_rate = 48000,
-            .vad_config = .{
-                .alt_vad_machine_configs = &.{
-                    .{},
-                    .{},
-                },
-            },
+            .vad_config = .{},
+            .record = .none,
         },
         null,
     );

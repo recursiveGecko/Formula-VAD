@@ -63,6 +63,8 @@ pub fn build(b: *Build) !void {
     try addDeepFilterNet(test_exe, null, common_options);
     try addKissFFT(test_exe, common_options);
     try addOnnx(test_exe, null, common_options);
+    // Tests won't be installed, we can't rely on relative RPATH
+    test_exe.each_lib_rpath = true;
 
     const test_run_artifact = b.addRunArtifact(test_exe);
     const test_run_step = b.step("test", "Run unit tests");
