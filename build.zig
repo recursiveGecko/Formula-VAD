@@ -29,15 +29,15 @@ pub fn build(b: *Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    const main_exe_install = b.addInstallArtifact(main_exe, .{});
-    b.getInstallStep().dependOn(&main_exe_install.step);
-
     try addClap(main_exe, common_options);
     try addSndfile(main_exe, common_options);
     try addKissFFT(main_exe, common_options);
-    try addOnnx(main_exe, main_exe_install, common_options);
-    try addDeepFilterNet(main_exe, main_exe_install, common_options);
-    try addDuckDb(main_exe, main_exe_install, common_options);
+    try addOnnx(main_exe, common_options);
+    try addDeepFilterNet(main_exe, common_options);
+    try addDuckDb(main_exe, common_options);
+
+    const main_exe_install = b.addInstallArtifact(main_exe, .{});
+    b.getInstallStep().dependOn(&main_exe_install.step);
 
     const main_run_artifact = b.addRunArtifact(main_exe);
     main_run_artifact.step.dependOn(&main_exe_install.step);
@@ -60,9 +60,9 @@ pub fn build(b: *Build) !void {
     });
     try addClap(test_exe, common_options);
     try addSndfile(test_exe, common_options);
-    try addDeepFilterNet(test_exe, null, common_options);
+    try addDeepFilterNet(test_exe, common_options);
     try addKissFFT(test_exe, common_options);
-    try addOnnx(test_exe, null, common_options);
+    try addOnnx(test_exe, common_options);
     // Tests won't be installed, we can't rely on relative RPATH
     test_exe.each_lib_rpath = true;
 
@@ -101,14 +101,15 @@ pub fn build(b: *Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    const sim_exe_install = b.addInstallArtifact(sim_exe, .{});
-    b.getInstallStep().dependOn(&sim_exe_install.step);
 
     try addClap(sim_exe, common_options);
     try addSndfile(sim_exe, common_options);
     try addKissFFT(sim_exe, common_options);
-    try addOnnx(sim_exe, sim_exe_install, common_options);
-    try addDeepFilterNet(sim_exe, sim_exe_install, common_options);
+    try addOnnx(sim_exe, common_options);
+    try addDeepFilterNet(sim_exe, common_options);
+
+    const sim_exe_install = b.addInstallArtifact(sim_exe, .{});
+    b.getInstallStep().dependOn(&sim_exe_install.step);
 
     const sim_run_artifact = b.addRunArtifact(sim_exe);
     sim_run_artifact.step.dependOn(&sim_exe_install.step);
@@ -183,7 +184,7 @@ fn addKissFFT(exe: *Build.Step.Compile, options: CommonOptions) !void {
     exe.linkLibrary(kiss_fft_lib.?);
 }
 
-fn addOnnx(exe: *Build.Step.Compile, exe_install: ?*Build.Step.InstallArtifact, options: CommonOptions) !void {
+fn addOnnx(exe: *Build.Step.Compile, options: CommonOptions) !void {
     const b = options.build;
     const onnx_dep = b.dependency("zig_onnxruntime", .{
         .target = options.target,
@@ -200,79 +201,50 @@ fn addOnnx(exe: *Build.Step.Compile, exe_install: ?*Build.Step.InstallArtifact, 
     // this works in this case because SONAME of libonnxruntime.so is directly referencing minor version `libonnxruntime.so.x.y.z`, which doesn't require symlinks
     // inspired by https://medium.com/@edlyuu/zig-package-manager-2-wtf-is-build-zig-zon-and-build-zig-0-11-0-update-5bc46e830fc1
     //
-    if (exe_install) |install| {
-        const src_path = onnx_dep.module("onnxruntime_lib").root_source_file.?.getPath(b);
-        const dst_path = try std.fs.path.join(b.allocator, &.{ b.install_path, "bin", "lib" });
+    const src_path = onnx_dep.module("onnxruntime_lib").root_source_file.?.getPath(b);
+    const dst_path = try std.fs.path.join(b.allocator, &.{ b.install_path, "bin", "lib" });
 
-        // const install_onnx_libs = options.build.addInstallDirectory(.{
-        //     .source_dir = .{ .path = src_path },
-        //     .install_dir = .bin,
-        //     .install_subdir = "lib",
-        // });
-        // install.step.dependOn(&install_onnx_libs.step);
+    // const install_onnx_libs = options.build.addInstallDirectory(.{
+    //     .source_dir = .{ .path = src_path },
+    //     .install_dir = .bin,
+    //     .install_subdir = "lib",
+    // });
+    // install.step.dependOn(&install_onnx_libs.step);
 
-        const install_onnx_symlinks = copySharedObjectsWithSymlinks(b, src_path, dst_path);
-        install.step.dependOn(&install_onnx_symlinks.step);
-    }
+    const install_onnx_symlinks = copySharedObjectsWithSymlinks(b, src_path, dst_path);
+    exe.step.dependOn(&install_onnx_symlinks.step);
 }
 
 // var build_dfn: ?*Build.Step.Run = null;
 var dfn_installed = false;
-fn addDeepFilterNet(exe: *Build.Step.Compile, exe_install: ?*Build.Step.InstallArtifact, options: CommonOptions) !void {
+fn addDeepFilterNet(exe: *Build.Step.Compile, options: CommonOptions) !void {
     const b = options.build;
 
-    const release_url = "https://github.com/Rikorose/DeepFilterNet/archive/refs/tags/v0.5.6.tar.gz";
+    const dfn_dep = b.dependency("deepfilternet", .{});
 
-    if (!dfn_installed) {
-        const stdout = b.run(&.{
-            "bash",
-            b.pathFromRoot("lib/deepfilternet/update.sh"),
-            release_url,
-        });
-        _ = stdout;
-        dfn_installed = true;
-    }
-
-    // This step download and build DeepFilterNet in `lib/` directory
-    // if (build_dfn == null) {
-    //     const cmd = b.addSystemCommand(&.{
-    //         "bash",
-    //         b.pathFromRoot("lib/deepfilternet/update.sh"),
-    //         release_url,
-    //     });
-    //     cmd.expectExitCode(0);
-
-    //     build_dfn = cmd;
-    // }
-    // exe.step.dependOn(&build_dfn.?.step);
-
-    const target_triple = "x86_64-unknown-linux-gnu";
-    const libdf_root = try std.fs.path.join(b.allocator, &.{ b.pathFromRoot("lib"), "deepfilternet", "target", target_triple });
-    const include_path = try std.fs.path.join(b.allocator, &.{ libdf_root, "include" });
-    const lib_path = try std.fs.path.join(b.allocator, &.{ libdf_root, "lib" });
-
-    exe.addIncludePath(.{ .path = include_path });
+    exe.addIncludePath(dfn_dep.path("include"));
 
     // Linking unwind or libcpp breaks stack traces
     // exe.addObjectFile(.{ .path = ".../...../libdeepfilter.a" });
     // exe.linkLibCpp(); // either one works
     // exe.linkSystemLibrary("unwind");
 
+    exe.addLibraryPath(dfn_dep.path("lib"));
     exe.linkSystemLibrary("deepfilter");
-    exe.addLibraryPath(.{ .path = lib_path });
     exe.linkLibC();
     try setRPath(exe);
 
     // Copy libs to output directory
-    if (exe_install) |install| {
-        const dst_path = try std.fs.path.join(b.allocator, &.{ b.install_path, "bin", "lib" });
-        const install_dfn_libs = copySharedObjectsWithSymlinks(b, lib_path, dst_path);
-        install.step.dependOn(&install_dfn_libs.step);
-    }
+    const dst_path = try std.fs.path.join(b.allocator, &.{ b.install_path, "bin", "lib" });
+    const install_dfn_libs = copySharedObjectsWithSymlinks(
+        b,
+        dfn_dep.path("lib").getPath(b),
+        dst_path,
+    );
+    exe.step.dependOn(&install_dfn_libs.step);
 }
 
-var download_duckdb: ?*Build.Step.Run = null;
-fn addDuckDb(exe: *Build.Step.Compile, exe_install: ?*Build.Step.InstallArtifact, options: CommonOptions) !void {
+fn addDuckDb(exe: *Build.Step.Compile, options: CommonOptions) !void {
     const b = options.build;
     const duckdb_release = "v0.10.1";
     const platform_dir = "linux-amd64";
@@ -282,18 +254,16 @@ fn addDuckDb(exe: *Build.Step.Compile, exe_install: ?*Build.Step.InstallArtifact
     const dynlib_src_path = try std.fs.path.join(b.allocator, &.{ lib_root, dynlib_name });
 
     // This step download libduckdb in `lib/` directory
-    if (download_duckdb == null) {
-        const cmd = b.addSystemCommand(&.{
-            "bash",
-            b.pathFromRoot("lib/libduckdb/update.sh"),
-            duckdb_release,
-        });
-        _ = cmd.captureStdOut();
-        cmd.expectExitCode(0);
+    const cmd = b.addSystemCommand(&.{
+        "bash",
+        b.pathFromRoot("lib/libduckdb/update.sh"),
+        duckdb_release,
+    });
+    cmd.expectExitCode(0);
+    // _ = cmd.captureStdOut(); // This combined with has_side_effects=true results in "attempt to use null value" with 0.12.0-dev.3397+43edd53c3
+    cmd.has_side_effects = true;
 
-        download_duckdb = cmd;
-    }
-    exe.step.dependOn(&download_duckdb.?.step);
+    exe.step.dependOn(&cmd.step);
 
     const zuckdb = b.dependency("zuckdb", .{
         .target = options.target,
@@ -305,16 +275,14 @@ fn addDuckDb(exe: *Build.Step.Compile, exe_install: ?*Build.Step.InstallArtifact
     try setRPath(exe);
 
     // Copy libs to output directory
-    if (exe_install) |install| {
-        const dst_rel_path = try std.fs.path.join(b.allocator, &.{ "lib", dynlib_name });
-        const install_shared_lib = b.addInstallBinFile(.{ .path = dynlib_src_path }, dst_rel_path);
-        install.step.dependOn(&install_shared_lib.step);
-    }
+    const dst_rel_path = try std.fs.path.join(b.allocator, &.{ "lib", dynlib_name });
+    const install_shared_lib = b.addInstallBinFile(.{ .path = dynlib_src_path }, dst_rel_path);
+    exe.step.dependOn(&install_shared_lib.step);
 }
 
 fn copySharedObjectsWithSymlinks(b: *Build, src_path: []const u8, dst_path: []const u8) *Build.Step.Run {
     const cmd = b.addSystemCommand(&.{ "find", src_path, "-maxdepth", "1", "-iname", "*.so*", "-exec", "cp", "-d", "{}", dst_path, ";" });
-
+    cmd.has_side_effects = true;
     cmd.expectExitCode(0);
     return cmd;
 }
