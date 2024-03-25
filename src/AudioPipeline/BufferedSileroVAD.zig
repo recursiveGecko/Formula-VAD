@@ -65,11 +65,10 @@ pub fn process(
         std.debug.panic("SileroVAD.runVAD() failed with error: {any}", .{err});
     };
 
-    var metadata = VADMetadata{};
-    metadata.push(input.metadata, 1);
-    metadata.push(.{ .silero_vad = vad_value }, 1);
+    var metadata = input.metadata;
+    metadata.silero_vad = vad_value;
 
     self.out_result = input.*;
-    self.out_result.metadata = metadata.toResult();
+    self.out_result.metadata = metadata;
     return &self.out_result;
 }
