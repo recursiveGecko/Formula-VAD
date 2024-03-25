@@ -3,11 +3,11 @@ set -eo pipefail
 
 NAME=libduckdb
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-DUCKDB_TAG=$1
+RELEASE_TAG=$1
 PLATFORMS=(linux-amd64)
 set -u
 
-if [ -z "$DUCKDB_TAG" ]; then
+if [ -z "$RELEASE_TAG" ]; then
   echo "GitHub tag must be provided as first and only argument"
   exit 1
 fi
@@ -24,9 +24,9 @@ done
 set -e
 
 for platform in "${PLATFORMS[@]}"; do
-  PLATFORM_DIR="$SCRIPT_DIR/${platform}"
+  PLATFORM_DIR="${SCRIPT_DIR}/${platform}"
   LIBDUCKDB_ARCHIVE="libduckdb-${platform}.zip"
-  DOWNLOAD_URL="https://github.com/duckdb/duckdb/releases/download/${DUCKDB_TAG}/${LIBDUCKDB_ARCHIVE}"
+  DOWNLOAD_URL="https://github.com/duckdb/duckdb/releases/download/${RELEASE_TAG}/${LIBDUCKDB_ARCHIVE}"
   VERSION_FILE="${PLATFORM_DIR}/VERSION.txt"
 
   EXISTING_VERSION=$(cat ${VERSION_FILE} 2>/dev/null || true )
@@ -35,7 +35,7 @@ for platform in "${PLATFORMS[@]}"; do
     continue
   fi
 
-  echo "Downloading ${DUCKDB_TAG} for ${platform} from ${DOWNLOAD_URL}"
+  echo "Downloading ${RELEASE_TAG} for ${platform} from ${DOWNLOAD_URL}"
 
   mkdir -p "${PLATFORM_DIR}"
   cd "${PLATFORM_DIR}"

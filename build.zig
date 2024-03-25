@@ -181,32 +181,6 @@ fn addKissFFT(exe: *Build.Step.Compile, options: CommonOptions) !void {
     exe.linkLibrary(kiss_fft_lib.?);
 }
 
-fn addDeepFilterNet(exe: *Build.Step.Compile, exe_install: ?*Build.Step.InstallArtifact, options: CommonOptions) !void {
-    const b = options.build;
-    const libdf_root = try std.fs.path.join(b.allocator, &.{ b.pathFromRoot("tmp"), "libdf" });
-    const include_path = try std.fs.path.join(b.allocator, &.{ libdf_root, "include" });
-    const lib_path = try std.fs.path.join(b.allocator, &.{ libdf_root, "lib" });
-
-    exe.addIncludePath(.{ .path = include_path });
-
-    // Linking unwind or libcpp breaks stack traces
-    // exe.addObjectFile(.{ .path = "tmp/libdf/lib/libdeepfilter.a" });
-    // exe.linkLibCpp(); // either works
-    // exe.linkSystemLibrary("unwind");
-
-    exe.linkSystemLibrary("deepfilter");
-    exe.addLibraryPath(.{ .path = lib_path });
-    exe.linkLibC();
-    try setRPath(exe);
-
-    // Copy libs to output directory
-    if (exe_install) |install| {
-        const dst_path = try std.fs.path.join(b.allocator, &.{ b.install_path, "bin", "lib" });
-        const install_dfn_libs = copySharedObjectsWithSymlinks(b, lib_path, dst_path);
-        install.step.dependOn(&install_dfn_libs.step);
-    }
-}
-
 fn addOnnx(exe: *Build.Step.Compile, exe_install: ?*Build.Step.InstallArtifact, options: CommonOptions) !void {
     const b = options.build;
     const onnx_dep = b.dependency("zig_onnxruntime", .{
@@ -237,6 +211,61 @@ fn addOnnx(exe: *Build.Step.Compile, exe_install: ?*Build.Step.InstallArtifact, 
 
         const install_onnx_symlinks = copySharedObjectsWithSymlinks(b, src_path, dst_path);
         install.step.dependOn(&install_onnx_symlinks.step);
+    }
+}
+
+// var build_dfn: ?*Build.Step.Run = null;
+var dfn_installed = false;
+fn addDeepFilterNet(exe: *Build.Step.Compile, exe_install: ?*Build.Step.InstallArtifact, options: CommonOptions) !void {
+    const b = options.build;
+
+    const release_url = "https://github.com/Rikorose/DeepFilterNet/archive/refs/tags/v0.5.6.tar.gz";
+
+    if (!dfn_installed) {
+        const stdout = b.run(&.{
+            "bash",
+            b.pathFromRoot("lib/deepfilternet/update.sh"),
+            release_url,
+        });
+        _ = stdout;
+        dfn_installed = true;
+    }
+
+    // This step download and build DeepFilterNet in `lib/` directory
+    // if (build_dfn == null) {
+    //     const cmd = b.addSystemCommand(&.{
+    //         "bash",
+    //         b.pathFromRoot("lib/deepfilternet/update.sh"),
+    //         release_url,
+    //     });
+    //     cmd.expectExitCode(0);
+
+    //     build_dfn = cmd;
+    // }
+    // exe.step.dependOn(&build_dfn.?.step);
+
+    const target_triple = "x86_64-unknown-linux-gnu";
+    const libdf_root = try std.fs.path.join(b.allocator, &.{ b.pathFromRoot("lib"), "deepfilternet", "target", target_triple });
+    const include_path = try std.fs.path.join(b.allocator, &.{ libdf_root, "include" });
+    const lib_path = try std.fs.path.join(b.allocator, &.{ libdf_root, "lib" });
+
+    exe.addIncludePath(.{ .path = include_path });
+
+    // Linking unwind or libcpp breaks stack traces
+    // exe.addObjectFile(.{ .path = ".../...../libdeepfilter.a" });
+    // exe.linkLibCpp(); // either one works
+    // exe.linkSystemLibrary("unwind");
+
+    exe.linkSystemLibrary("deepfilter");
+    exe.addLibraryPath(.{ .path = lib_path });
+    exe.linkLibC();
+    try setRPath(exe);
+
+    // Copy libs to output directory
+    if (exe_install) |install| {
+        const dst_path = try std.fs.path.join(b.allocator, &.{ b.install_path, "bin", "lib" });
+        const install_dfn_libs = copySharedObjectsWithSymlinks(b, lib_path, dst_path);
+        install.step.dependOn(&install_dfn_libs.step);
     }
 }
 

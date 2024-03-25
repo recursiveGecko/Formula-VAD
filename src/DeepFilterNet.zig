@@ -24,11 +24,10 @@ pub fn init(
         return error.UnsupportedSampleRate;
     }
 
-    const df_state = df.df_create(
-        model_path,
-        20,
-        "info",
-    );
+    // 0 - 100
+    const attenuation = 20;
+
+    const df_state = df.df_create(model_path, attenuation);
 
     if (df_state == null) {
         return error.InitializationFailed;
@@ -42,7 +41,7 @@ pub fn init(
         .frame_length = df.df_get_frame_length(df_state),
     };
 
-    self.consumeLogs();
+    // self.consumeLogs();
 
     return self;
 }
@@ -70,10 +69,10 @@ pub fn denoise(self: *Self, in_samples: []const f32, out_samples: []f32) !void {
     // self.consumeLogs();
 }
 
-fn consumeLogs(self: *const Self) void {
-    while (df.df_next_log_msg(self.df_state)) |msg| {
-        defer df.df_free_log_msg(msg);
+// fn consumeLogs(self: *const Self) void {
+//     while (df.df_next_log_msg(self.df_state)) |msg| {
+//         defer df.df_free_log_msg(msg);
 
-        log.info("{s}", .{msg});
-    }
-}
+//         log.info("{s}", .{msg});
+//     }
+// }
