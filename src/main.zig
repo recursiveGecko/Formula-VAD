@@ -135,7 +135,6 @@ pub fn main() !void {
     const pipeline_config = AudioPipeline.Config{
         .sample_rate = 48000,
         .n_channels = 2,
-        .buffer_length = 48000 * 10,
         .vad_config = AudioPipeline.Config.VADConfig{
             .denoiser_model_path = denoiser_model_path,
         },

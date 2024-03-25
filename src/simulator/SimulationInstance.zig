@@ -163,7 +163,6 @@ fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]AudioP
             .n_channels = audio.nChannels(),
             .vad_config = self.sim_config.vad_config,
             .record = self.cli_args.record,
-            // .skip_processing = true,
         },
         pipeline_ctx.toPipelineCallbacks(),
     );

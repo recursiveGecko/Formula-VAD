@@ -39,9 +39,7 @@ pub const Config = struct {
 
     sample_rate: usize,
     n_channels: usize,
-    buffer_length: ?usize = null,
     vad_config: VADConfig = .{},
-    skip_processing: bool = false,
     record: RecordingTarget,
 };
 
