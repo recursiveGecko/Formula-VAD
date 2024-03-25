@@ -62,7 +62,7 @@ rm -r "${MODELS_DIR}" 2>&1 >/dev/null || true
 cp cbindgen.toml libDF
 # Build DeepFilterNet, copy artifacts to ./out
 for target in "${TARGETS[@]}"; do
-  cargo "+${BLESSED_RUST_VERSION}" cinstall --frozen --package deep_filter --profile release-lto --target "${target}" --prefix "${TARGET_DIR}/${target}"
+  cargo "+${BLESSED_RUST_VERSION}" cinstall --locked --package deep_filter --profile release-lto --target "${target}" --prefix "${TARGET_DIR}/${target}"
 done
 
 # Copy models over too
