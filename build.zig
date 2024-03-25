@@ -281,8 +281,14 @@ fn addDuckDb(exe: *Build.Step.Compile, options: CommonOptions) !void {
 }
 
 fn copySharedObjectsWithSymlinks(b: *Build, src_path: []const u8, dst_path: []const u8) *Build.Step.Run {
-    const cmd = b.addSystemCommand(&.{ "find", src_path, "-maxdepth", "1", "-iname", "*.so*", "-exec", "cp", "-d", "{}", dst_path, ";" });
-    cmd.has_side_effects = true;
-    cmd.expectExitCode(0);
-    return cmd;
+    const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", dst_path });
+    mkdir_cmd.has_side_effects = true;
+    mkdir_cmd.expectExitCode(0);
+
+    const cp_cmd = b.addSystemCommand(&.{ "find", src_path, "-maxdepth", "1", "-iname", "*.so*", "-exec", "cp", "-d", "{}", dst_path, ";" });
+    cp_cmd.has_side_effects = true;
+    cp_cmd.expectExitCode(0);
+    cp_cmd.step.dependOn(&mkdir_cmd.step);
+
+    return cp_cmd;
 }
