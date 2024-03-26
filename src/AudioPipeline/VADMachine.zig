@@ -130,10 +130,10 @@ pub fn run(
     const config = self.config;
 
     // Find the average volume in the speech band
-    const vol_in_speech_band = try BufferedFFT.averageVolumeInBand(
-        fft_result,
+    const vol_in_speech_band = try fft_result.averageVolumeInBand(
         config.speech_min_freq,
         config.speech_max_freq,
+        true,
     );
 
     // Number of consecutive samples above the threshold before the VAD opens
@@ -301,4 +301,8 @@ pub fn getOffsetRecordingEnd(self: Self, vad_to: u64) u64 {
     const end_buffer: usize = @intFromFloat(sample_rate_f * 2);
     const record_to = vad_to + end_buffer;
     return record_to;
+}
+
+test {
+    std.testing.refAllDecls(@This());
 }

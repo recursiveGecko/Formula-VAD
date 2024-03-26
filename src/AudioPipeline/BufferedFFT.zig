@@ -47,6 +47,30 @@ pub const FFTResult = struct {
     pub fn deinit(self: *FFTResult) void {
         self.allocator.free(self.freq_bins);
     }
+
+    pub fn averageVolumeInBand(
+        result: *const FFTResult,
+        min_freq: f32,
+        max_freq: f32,
+        max_inclusive: bool,
+    ) !f32 {
+        const min_bin = try FFT.freqToBin(result.sample_rate, min_freq, result.fft_size);
+        var max_bin = try FFT.freqToBin(result.sample_rate, max_freq, result.fft_size);
+        if (max_inclusive) max_bin += 1;
+
+        var avg_vol: f32 = 0;
+        for (min_bin..max_bin) |i| {
+            avg_vol += result.freq_bins[i];
+        }
+
+        return avg_vol;
+    }
+
+    pub fn binWidth(
+        result: *const FFTResult,
+    ) f32 {
+        return FFT.binWidth(result.sample_rate, result.fft_size);
+    }
 };
 
 allocator: Allocator,
@@ -156,21 +180,4 @@ pub fn process(
     self.pipeline.onFFTResult(input, &self.temp_result);
 
     return input;
-}
-
-pub fn averageVolumeInBand(
-    result: *const FFTResult,
-    min_freq: f32,
-    max_freq: f32,
-) !f32 {
-    const min_bin = try FFT.freqToBin(result.sample_rate, min_freq, result.fft_size);
-    const max_bin = try FFT.freqToBin(result.sample_rate, max_freq, result.fft_size);
-
-    var avg_vol: f32 = 0;
-
-    for (min_bin..max_bin + 1) |i| {
-        avg_vol += result.freq_bins[i];
-    }
-
-    return avg_vol;
 }
