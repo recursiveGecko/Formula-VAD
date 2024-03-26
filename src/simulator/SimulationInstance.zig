@@ -8,6 +8,7 @@ const AudioBuffer = @import("../audio_utils/AudioBuffer.zig");
 const AudioSource = @import("../audio_utils/AudioSource.zig").AudioSource;
 const simulator = @import("../simulator.zig");
 const Evaluator = @import("../Evaluator.zig");
+const DataLogger = @import("../DataLogger.zig");
 const static_sim_config = simulator.static_sim_config;
 const SimulationInstanceJSON = simulator.SimulationInstanceJSON;
 const DynamicSimConfig = simulator.DynamicSimConfig;
@@ -23,11 +24,13 @@ pub const Opts = struct {
     instance_json: SimulationInstanceJSON,
     sim_config: DynamicSimConfig,
     cli_args: simulator.CLIArgs,
+    data_logger: ?DataLogger,
 };
 
 // Wraps the pipeline context that is required for AudioPipeline callbacks
 const PipelineContext = struct {
     sim_instance: *SimulationInstance,
+    allocator: Allocator,
 
     pub fn onRecording(
         self_opaque: *anyopaque,
@@ -35,7 +38,7 @@ const PipelineContext = struct {
         audio_buffer: AudioBuffer,
     ) void {
         const self: *PipelineContext = @ptrCast(@alignCast(self_opaque));
-        const allocator = self.sim_instance.main_thread_allocator;
+        const allocator = self.allocator;
 
         if (self.sim_instance.output_dir == null) return;
 
@@ -72,67 +75,46 @@ const PipelineContext = struct {
 };
 
 name: []const u8,
-audio_source: *AudioSource,
+audio_stream: AudioFileStream,
 output_dir: ?[]const u8,
 reference_segments: []const Evaluator.SpeechSegment,
 evaluator: ?Evaluator = null,
 sim_config: DynamicSimConfig,
-main_thread_allocator: Allocator,
 cli_args: simulator.CLIArgs,
+main_thread_allocator: Allocator,
 
 pub fn init(
-    allocator: Allocator,
+    arena_alloc: Allocator,
     opts: Opts,
 ) !Self {
-    const name = try allocator.dupe(u8, opts.instance_json.name);
-    errdefer allocator.free(name);
+    const name = try arena_alloc.dupe(u8, opts.instance_json.name);
 
-    const audio_path = try fs.path.resolve(allocator, &.{ opts.base_path, opts.instance_json.audio_path });
-    defer allocator.free(audio_path);
+    const audio_path = try fs.path.resolve(arena_alloc, &.{ opts.base_path, opts.instance_json.audio_path });
+    const ref_path = try fs.path.resolve(arena_alloc, &.{ opts.base_path, opts.instance_json.ref_path });
 
-    const ref_path = try fs.path.resolve(allocator, &.{ opts.base_path, opts.instance_json.ref_path });
-    defer allocator.free(ref_path);
-
-    const audio_source = try allocator.create(AudioSource);
-    errdefer allocator.destroy(audio_source);
-
-    if (opts.sim_config.preload_audio) {
-        const audio_buffer = try AudioBuffer.loadFromFile(allocator, audio_path);
-        audio_source.* = AudioSource{ .buffer = audio_buffer };
-    } else {
-        const audio_stream = try AudioFileStream.open(allocator, audio_path);
-        audio_source.* = AudioSource{ .stream = audio_stream };
-    }
-
-    const ref_segments = try Evaluator.readParseAudacitySegments(allocator, ref_path, Evaluator.SpeechSegment.Side.ref);
-    errdefer allocator.free(ref_segments);
+    const audio_stream = try AudioFileStream.open(arena_alloc, audio_path);
+    const ref_segments = try Evaluator.readParseAudacitySegments(arena_alloc, ref_path, Evaluator.SpeechSegment.Side.ref);
 
     return Self{
         .name = name,
         .output_dir = opts.output_dir,
-        .audio_source = audio_source,
+        .audio_stream = audio_stream,
         .reference_segments = ref_segments,
         .evaluator = null,
-        .main_thread_allocator = allocator,
         .sim_config = opts.sim_config,
         .cli_args = opts.cli_args,
+        .main_thread_allocator = arena_alloc,
     };
 }
 
 pub fn deinit(self: *@This()) void {
-    const alloc = self.main_thread_allocator;
-
-    self.audio_source.deinit();
-    alloc.destroy(self.audio_source);
-    alloc.free(self.name);
-    alloc.free(self.reference_segments);
-    if (self.output_dir) |od| alloc.free(od);
-    if (self.evaluator) |*e| e.deinit();
+    self.audio_stream.close();
 }
 
 pub fn run(self: *Self) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{
         .verbose_log = static_sim_config.verbose_allocation_log,
+        .thread_safe = false,
     }){};
     defer {
         if (builtin.mode != .Debug) _ = gpa.detectLeaks();
@@ -143,24 +125,25 @@ pub fn run(self: *Self) !void {
 
     log.info(
         "{s}: Streaming {d:.2}s from audio file. Running...",
-        .{ self.name, self.audio_source.durationSeconds() },
+        .{ self.name, self.audio_stream.durationSeconds() },
     );
-    const vad_segments = try self.simulateVAD(thread_allocator, self.audio_source);
+    const vad_segments = try self.simulateVAD(thread_allocator, self.audio_stream);
     defer thread_allocator.free(vad_segments);
 
     try self.storeResult(vad_segments);
 }
 
-fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]AudioPipeline.SpeechSegment {
+fn simulateVAD(self: *Self, thread_alloc: Allocator, stream: AudioFileStream) ![]AudioPipeline.SpeechSegment {
     var pipeline_ctx = PipelineContext{
+        .allocator = thread_alloc,
         .sim_instance = self,
     };
 
     const pipeline = try AudioPipeline.init(
-        allocator,
+        thread_alloc,
         .{
-            .sample_rate = audio.sampleRate(),
-            .n_channels = audio.nChannels(),
+            .sample_rate = stream.sample_rate,
+            .n_channels = stream.n_channels,
             .vad_config = self.sim_config.vad_config,
             .record = self.cli_args.record,
         },
@@ -168,25 +151,23 @@ fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]AudioP
     );
     defer pipeline.deinit();
 
-    // const sample_rate = audio.sampleRate();
-
-    if (audio.* == .stream) {
-        var stream = audio.stream;
+    // Run simulation
+    {
         const frame_count = self.sim_config.audio_read_frame_count;
 
         // The backing slice of slices for our audio samples
-        var backing_channel_pcm = try allocator.alloc([]f32, audio.nChannels());
+        var backing_channel_pcm = try thread_alloc.alloc([]f32, stream.n_channels);
         // The slice we'll pass to the audio pipeline, trimmed to the actual number of samples read.
-        var trimmed_channel_pcm = try allocator.alloc([]f32, audio.nChannels());
+        var trimmed_channel_pcm = try thread_alloc.alloc([]f32, stream.n_channels);
         var channels_allocated: usize = 0;
         defer {
-            for (0..channels_allocated) |i| allocator.free(backing_channel_pcm[i]);
-            allocator.free(backing_channel_pcm);
-            allocator.free(trimmed_channel_pcm);
+            for (0..channels_allocated) |i| thread_alloc.free(backing_channel_pcm[i]);
+            thread_alloc.free(backing_channel_pcm);
+            thread_alloc.free(trimmed_channel_pcm);
         }
         // Initialize the backing channel slices
         for (0..backing_channel_pcm.len) |i| {
-            backing_channel_pcm[i] = try allocator.alloc(f32, frame_count);
+            backing_channel_pcm[i] = try thread_alloc.alloc(f32, frame_count);
             channels_allocated += 1;
         }
 
@@ -195,21 +176,16 @@ fn simulateVAD(self: *Self, allocator: Allocator, audio: *AudioSource) ![]AudioP
             const frames_read = try stream.read(backing_channel_pcm, 0, frame_count);
             if (frames_read == 0) break;
 
-            for (0..audio.nChannels()) |i| {
+            for (0..stream.n_channels) |i| {
                 trimmed_channel_pcm[i] = backing_channel_pcm[i][0..frames_read];
             }
 
             _ = try pipeline.pushSamples(trimmed_channel_pcm);
         }
-    } else if (audio.* == .buffer) {
-        const audio_buffer = audio.buffer;
-        _ = try pipeline.pushSamples(audio_buffer.channel_pcm_buf);
-    } else {
-        unreachable;
     }
 
     const vad_segments = try pipeline.vad_machine.vad_segments.toOwnedSlice();
-    errdefer allocator.free(vad_segments);
+    errdefer thread_alloc.free(vad_segments);
 
     return vad_segments;
 }
@@ -219,9 +195,8 @@ pub fn storeResult(
     vad_segments: []AudioPipeline.SpeechSegment,
 ) !void {
     var speech_segments = try self.main_thread_allocator.alloc(Evaluator.SpeechSegment, vad_segments.len);
-    errdefer self.main_thread_allocator.free(speech_segments);
 
-    const sample_rate = self.audio_source.sampleRate();
+    const sample_rate = self.audio_stream.sample_rate;
 
     for (vad_segments, 0..) |vad_segment, i| {
         const from_sec = @as(f32, @floatFromInt(vad_segment.sample_from)) / @as(f32, @floatFromInt(sample_rate));
@@ -242,5 +217,4 @@ pub fn storeResult(
     }
 
     self.evaluator = try Evaluator.initAndRun(self.main_thread_allocator, speech_segments, self.reference_segments);
-    errdefer self.evaluator.deinit();
 }

@@ -5,6 +5,7 @@ const clap = @import("clap");
 const Evaluator = @import("Evaluator.zig");
 const SimulationInstance = @import("./simulator/SimulationInstance.zig");
 const AudioPipeline = @import("./AudioPipeline.zig");
+const DataLogger = @import("./DataLogger.zig");
 const report_generator = @import("./simulator/report_generator.zig");
 
 const Thread = std.Thread;
@@ -35,26 +36,19 @@ pub const static_sim_config = StaticSimConfig{};
 pub const DynamicSimConfig = struct {
     vad_config: AudioPipeline.Config.VADConfig = .{},
     output_dir: ?[]const u8 = null,
-
-    /// Whether to preload audio into memory or stream it
-    preload_audio: bool = false,
     /// Number of audio samples to read at a time when streaming audio
     audio_read_frame_count: usize = 48000,
 };
 
 pub const Simulation = struct {
-    allocator: Allocator,
     instances: []SimulationInstance,
     config: DynamicSimConfig = .{},
-    original_json: std.json.Parsed(SimulationJSON),
-    base_path: []const u8,
     resolved_out_path: ?[]const u8,
+    data_logger: ?DataLogger,
 
     pub fn deinit(self: *@This()) void {
-        self.original_json.deinit();
-        if (self.resolved_out_path) |path| self.allocator.free(path);
+        if (self.data_logger) |*dl| dl.deinit();
         for (self.instances) |*instance| instance.deinit();
-        self.allocator.free(self.instances);
     }
 };
 
@@ -72,12 +66,14 @@ pub const SimulationInstanceJSON = struct {
 pub const CLIArgs = struct {
     plan_json_path: []const u8,
     record: AudioPipeline.Config.RecordingTarget,
+    data_logger_enabled: bool,
 };
 
 const cli_params = clap.parseParamsComptime(
-    \\-h, --help             Display this help and exit
-    \\-i, --input <str>      Simulation plan (path to JSON)
-    \\-r, --record <record>  Select which audio to record (all, original, none)
+    \\-h, --help               Display this help and exit
+    \\-i, --input    <str>     Simulation plan (path to JSON)
+    \\-r, --record   <record>  Select which audio to record (all, original, none)
+    \\    --data-log           Enable data logging to .parquet file
     \\
 );
 
@@ -88,7 +84,12 @@ fn printHelp() !void {
 /// Entrypoint for CLI invocation
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var allocator = gpa.allocator();
+    defer _ = gpa.deinit();
+
+    var unsafe_arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    var thread_safe_arena = std.heap.ThreadSafeAllocator{ .child_allocator = unsafe_arena.allocator() };
+    const arena_alloc = thread_safe_arena.allocator();
+    defer unsafe_arena.deinit();
 
     const arg_parsers = .{
         .str = clap.parsers.string,
@@ -96,15 +97,14 @@ pub fn main() !void {
     };
 
     var diag = clap.Diagnostic{};
-    var res = clap.parse(clap.Help, &cli_params, arg_parsers, .{
-        .allocator = allocator,
+    const res = clap.parse(clap.Help, &cli_params, arg_parsers, .{
+        .allocator = arena_alloc,
         .diagnostic = &diag,
     }) catch |err| {
         try printHelp();
         diag.report(stderr.writer(), err) catch {};
         exit(1);
     };
-    defer res.deinit();
 
     if (res.args.help == 1) {
         try printHelp();
@@ -119,16 +119,18 @@ pub fn main() !void {
     const cli_args = CLIArgs{
         .record = res.args.record orelse .none,
         .plan_json_path = res.args.input.?,
+        .data_logger_enabled = res.args.@"data-log" == 1,
     };
 
     // Initialize and run the simulation
-    var simulation = initialize(allocator, cli_args) catch |err| {
+
+    var simulation = initialize(arena_alloc, cli_args) catch |err| {
         try stderr_w.print("Failed to initialize simulation: {}\n", .{err});
         exit(1);
     };
     defer simulation.deinit();
 
-    try runAll(allocator, simulation);
+    try runAll(arena_alloc, simulation);
 
     const stat_config = Evaluator.statistics.StatConfig{
         .ignore_shorter_than_sec = simulation.config.vad_config.vad_machine_config.min_vad_duration_sec,
@@ -137,38 +139,34 @@ pub fn main() !void {
         .fill_gaps = 5,
     };
 
-    const report = try report_generator.bufPrintSimulationReport(allocator, simulation.*, stat_config);
-    defer allocator.free(report);
+    const report = try report_generator.bufPrintSimulationReport(arena_alloc, simulation.*, stat_config);
 
     try stdout_w.writeAll(report);
 
     // Generate output and report
-    _ = try maybeSaveOutput(allocator, simulation);
+    _ = try maybeSaveOutput(arena_alloc, simulation);
 
     // Save report
-    const report_path = try std.fs.path.join(allocator, &.{ simulation.resolved_out_path.?, "report.txt" });
-    defer allocator.free(report_path);
+    const report_path = try std.fs.path.join(arena_alloc, &.{ simulation.resolved_out_path.?, "report.txt" });
     try std.fs.Dir.writeFile(fs.cwd(), report_path, report);
 }
 
-pub fn initialize(allocator: Allocator, cli_args: CLIArgs) !*Simulation {
-    const json_path = cli_args.plan_json_path;
-    const base_path = fs.path.dirname(json_path) orelse ".";
+pub fn initialize(arena_alloc: Allocator, cli_args: CLIArgs) !*Simulation {
+    const plan_path = cli_args.plan_json_path;
+    const plan_dir_path = fs.path.dirname(plan_path) orelse ".";
 
     // Read and parse the simulation plan JSON
-    const plan_contents = try fs.Dir.readFileAlloc(fs.cwd(), allocator, json_path, 10 * megabyte);
-    defer allocator.free(plan_contents);
+    const plan_contents = try fs.Dir.readFileAlloc(fs.cwd(), arena_alloc, plan_path, 10 * megabyte);
 
-    const plan_json = try std.json.parseFromSlice(SimulationJSON, allocator, plan_contents, .{
+    const plan_json = try std.json.parseFromSlice(SimulationJSON, arena_alloc, plan_contents, .{
         .ignore_unknown_fields = true,
     });
 
     // If output dir was specified, create a timestamped output directory for this simulation
     const resolved_out_path: ?[]const u8 = val: {
         if (plan_json.value.config.output_dir) |out_dir| {
-            const subdir_name = try std.fmt.allocPrint(allocator, "{d}", .{std.time.timestamp()});
-            const subdir_path = try fs.path.resolve(allocator, &.{ base_path, out_dir, subdir_name });
-            defer allocator.free(subdir_name);
+            const subdir_name = try std.fmt.allocPrint(arena_alloc, "{d}", .{std.time.timestamp()});
+            const subdir_path = try fs.path.resolve(arena_alloc, &.{ plan_dir_path, out_dir, subdir_name });
 
             try fs.Dir.makePath(fs.cwd(), subdir_path);
             break :val subdir_path;
@@ -176,63 +174,60 @@ pub fn initialize(allocator: Allocator, cli_args: CLIArgs) !*Simulation {
             break :val null;
         }
     };
-    errdefer if (resolved_out_path) |path| allocator.free(path);
 
     // Maybe copy the plan JSON to the output directory
     if (resolved_out_path) |out_dir| {
-        const json_copy_path = try fs.path.join(allocator, &.{ out_dir, "plan.json" });
-        defer allocator.free(json_copy_path);
+        const json_copy_path = try fs.path.join(arena_alloc, &.{ out_dir, "plan.json" });
         try fs.Dir.writeFile(fs.cwd(), json_copy_path, plan_contents);
     }
 
     // Allocate instances
-    var instances = try allocator.alloc(SimulationInstance, plan_json.value.instances.len);
-    var instances_alloc: usize = 0;
-    errdefer {
-        for (0..instances_alloc) |i| instances[i].deinit();
-        allocator.free(instances);
+    var instances = try arena_alloc.alloc(SimulationInstance, plan_json.value.instances.len);
+
+    // Initialize data logger
+    const data_logger: ?DataLogger = null;
+    if (cli_args.data_logger_enabled) {
+        // data_logger = try DataLogger.init(allocator, data_log_path);
     }
 
     // Initialize instances, maybe creating output directories for each
     for (plan_json.value.instances, 0..) |instance_json, i| {
         const out_dir = val: {
             if (resolved_out_path == null) break :val null;
+            // If we're not recording audio, we don't need the output dir
+            if (cli_args.record == .none) break :val null;
 
-            const instance_out_dir = try fs.path.resolve(allocator, &.{ resolved_out_path.?, instance_json.name });
+            const instance_out_dir = try fs.path.resolve(arena_alloc, &.{ resolved_out_path.?, instance_json.name });
             try fs.Dir.makePath(fs.cwd(), instance_out_dir);
             break :val instance_out_dir;
         };
 
         const opts = SimulationInstance.Opts{
-            .base_path = base_path,
+            .base_path = plan_dir_path,
             .output_dir = out_dir,
             .instance_json = instance_json,
             .sim_config = plan_json.value.config,
             .cli_args = cli_args,
+            .data_logger = data_logger,
         };
 
-        instances[i] = try SimulationInstance.init(allocator, opts);
-        instances_alloc += 1;
+        instances[i] = try SimulationInstance.init(arena_alloc, opts);
     }
 
-    const simulation = try allocator.create(Simulation);
-    errdefer allocator.destroy(simulation);
+    const simulation = try arena_alloc.create(Simulation);
 
     simulation.* = Simulation{
         .instances = instances,
         .config = plan_json.value.config,
-        .original_json = plan_json,
-        .base_path = base_path,
         .resolved_out_path = resolved_out_path,
-        .allocator = allocator,
+        .data_logger = data_logger,
     };
 
     return simulation;
 }
 
-pub fn runAll(allocator: Allocator, simulation: *Simulation) !void {
-    var threads = try allocator.alloc(Thread, simulation.instances.len);
-    errdefer allocator.free(threads);
+pub fn runAll(arena_alloc: Allocator, simulation: *Simulation) !void {
+    var threads = try arena_alloc.alloc(Thread, simulation.instances.len);
 
     for (simulation.instances, 0..) |*instance, i| {
         threads[i] = try Thread.spawn(.{}, SimulationInstance.run, .{instance});
@@ -243,7 +238,7 @@ pub fn runAll(allocator: Allocator, simulation: *Simulation) !void {
     }
 }
 
-pub fn maybeSaveOutput(allocator: Allocator, simulation: *const Simulation) !bool {
+pub fn maybeSaveOutput(arena_alloc: Allocator, simulation: *const Simulation) !bool {
     if (simulation.resolved_out_path == null) return false;
     const out_dir = simulation.resolved_out_path.?;
 
@@ -252,13 +247,9 @@ pub fn maybeSaveOutput(allocator: Allocator, simulation: *const Simulation) !boo
             log.warn("Not saving output of instance {s} because it doesn't contain a result\n", .{instance.name});
         }
 
-        const audacity_filename = try std.fmt.allocPrint(allocator, "{s}-audacity.txt", .{instance.name});
-        defer allocator.free(audacity_filename);
-        const audacity_path = try fs.path.join(allocator, &.{ out_dir, audacity_filename });
-        defer allocator.free(audacity_path);
-
-        const audacity_txt = try Evaluator.formats.serializeEvaluatorToAudacityTxt(allocator, instance.evaluator.?);
-        defer allocator.free(audacity_txt);
+        const audacity_filename = try std.fmt.allocPrint(arena_alloc, "{s}-audacity.txt", .{instance.name});
+        const audacity_path = try fs.path.join(arena_alloc, &.{ out_dir, audacity_filename });
+        const audacity_txt = try Evaluator.formats.serializeEvaluatorToAudacityTxt(arena_alloc, instance.evaluator.?);
 
         fs.Dir.writeFile(fs.cwd(), audacity_path, audacity_txt) catch |err| {
             log.err("Failed to write Audacity txt: {any}", .{err});
