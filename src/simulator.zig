@@ -36,8 +36,6 @@ pub const static_sim_config = StaticSimConfig{};
 pub const DynamicSimConfig = struct {
     vad_config: AudioPipeline.Config.VADConfig = .{},
     output_dir: ?[]const u8 = null,
-    /// Number of audio samples to read at a time when streaming audio
-    audio_read_frame_count: usize = 48000,
 };
 
 pub const Simulation = struct {
@@ -124,7 +122,7 @@ pub fn main() !void {
 
     // Initialize and run the simulation
 
-    var simulation = initialize(arena_alloc, cli_args) catch |err| {
+    var simulation = initialize(arena_alloc, gpa.allocator(), cli_args) catch |err| {
         try stderr_w.print("Failed to initialize simulation: {}\n", .{err});
         exit(1);
     };
@@ -151,7 +149,7 @@ pub fn main() !void {
     try std.fs.Dir.writeFile(fs.cwd(), report_path, report);
 }
 
-pub fn initialize(arena_alloc: Allocator, cli_args: CLIArgs) !*Simulation {
+pub fn initialize(arena_alloc: Allocator, gpa_alloc: Allocator, cli_args: CLIArgs) !*Simulation {
     const plan_path = cli_args.plan_json_path;
     const plan_dir_path = fs.path.dirname(plan_path) orelse ".";
 
@@ -175,20 +173,24 @@ pub fn initialize(arena_alloc: Allocator, cli_args: CLIArgs) !*Simulation {
         }
     };
 
-    // Maybe copy the plan JSON to the output directory
+    var data_logger: ?DataLogger = null;
+
+    // Maybe copy the plan JSON to the output directory and initialize DataLogger
     if (resolved_out_path) |out_dir| {
         const json_copy_path = try fs.path.join(arena_alloc, &.{ out_dir, "plan.json" });
         try fs.Dir.writeFile(fs.cwd(), json_copy_path, plan_contents);
+
+        // Initialize data logger
+        if (cli_args.data_logger_enabled) {
+            const data_log_path = try fs.path.resolve(arena_alloc, &.{ out_dir, "data-log.duckdb" });
+            data_logger = try DataLogger.open(gpa_alloc, data_log_path);
+            // data_logger = try DataLogger.open(gpa_alloc, ":memory:");
+            try data_logger.?.createTables();
+        }
     }
 
     // Allocate instances
     var instances = try arena_alloc.alloc(SimulationInstance, plan_json.value.instances.len);
-
-    // Initialize data logger
-    const data_logger: ?DataLogger = null;
-    if (cli_args.data_logger_enabled) {
-        // data_logger = try DataLogger.init(allocator, data_log_path);
-    }
 
     // Initialize instances, maybe creating output directories for each
     for (plan_json.value.instances, 0..) |instance_json, i| {
@@ -245,6 +247,7 @@ pub fn maybeSaveOutput(arena_alloc: Allocator, simulation: *const Simulation) !b
     for (simulation.instances) |instance| {
         if (instance.evaluator == null) {
             log.warn("Not saving output of instance {s} because it doesn't contain a result\n", .{instance.name});
+            return false;
         }
 
         const audacity_filename = try std.fmt.allocPrint(arena_alloc, "{s}-audacity.txt", .{instance.name});
