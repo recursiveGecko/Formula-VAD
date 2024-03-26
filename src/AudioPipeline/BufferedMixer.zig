@@ -143,9 +143,12 @@ pub fn process(self: *Self, prev_result: *const BufferedStep.Result) *const Buff
             self.best_channel = quieter_chan_index;
         }
 
-        metadata.volume_max = max_vol;
-        metadata.volume_min = min_vol;
+        const best_channel_rms = if (self.best_channel == 0) left_vol else right_vol;
+
+        metadata.volume_rms = best_channel_rms;
         metadata.volume_ratio = instant_ratio;
+    } else if (n_channels == 1) {
+        metadata.volume_rms = audio_utils.rmsVolume(in_segment.channel_pcm_buf[0]);
     }
 
     const in_channel = in_segment.channel_pcm_buf[self.best_channel];

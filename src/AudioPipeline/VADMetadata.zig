@@ -4,23 +4,19 @@ const Self = @This();
 
 pub const Result = struct {
     volume_ratio: ?f32 = null,
-    volume_min: ?f32 = null,
-    volume_max: ?f32 = null,
+    volume_rms: ?f32 = null,
     silero_vad: ?f32 = null,
 };
 
 volume_ratio_sum: ?f32 = null,
 volume_ratio_weight: ?f32 = null,
-volume_min: ?f32 = null,
-volume_max: ?f32 = null,
+volume_rms_sum: ?f32 = null,
+volume_rms_weight: ?f32 = null,
 silero_vad_sum: ?f32 = null,
 silero_vad_weight: ?f32 = null,
 
 pub fn toResult(self: *Self) Result {
     var data = Result{};
-
-    data.volume_min = self.volume_min;
-    data.volume_max = self.volume_max;
 
     if (self.volume_ratio_sum != null) {
         data.volume_ratio = self.volume_ratio_sum.? / self.volume_ratio_weight.?;
@@ -28,6 +24,10 @@ pub fn toResult(self: *Self) Result {
 
     if (self.silero_vad_sum != null) {
         data.silero_vad = self.silero_vad_sum.? / self.silero_vad_weight.?;
+    }
+
+    if (self.volume_rms_sum != null) {
+        data.volume_rms = self.volume_rms_sum.? / self.volume_rms_weight.?;
     }
 
     return data;
@@ -40,9 +40,8 @@ pub fn push(self: *Self, values: anytype, weight_any: anytype) void {
         weight_any;
 
     const new_volume_ratio = getValueOrNull(f32, values, "volume_ratio");
-    const new_volume_min = getValueOrNull(f32, values, "volume_min");
-    const new_volume_max = getValueOrNull(f32, values, "volume_max");
     const new_silero_vad = getValueOrNull(f32, values, "silero_vad");
+    const new_volume_rms = getValueOrNull(f32, values, "volume_rms");
 
     if (new_volume_ratio) |new_val| {
         if (self.volume_ratio_sum == null) {
@@ -54,16 +53,14 @@ pub fn push(self: *Self, values: anytype, weight_any: anytype) void {
         self.volume_ratio_weight.? += weight;
     }
 
-    if (new_volume_min) |new_val| {
-        if (self.volume_min == null or new_val < self.volume_min.?) {
-            self.volume_min = new_val;
+    if (new_volume_rms) |new_val| {
+        if (self.volume_rms_sum == null) {
+            self.volume_rms_sum = 0.0;
+            self.volume_rms_weight = 0.0;
         }
-    }
 
-    if (new_volume_max) |new_val| {
-        if (self.volume_max == null or new_val > self.volume_max.?) {
-            self.volume_max = new_val;
-        }
+        self.volume_rms_sum.? += new_val * weight;
+        self.volume_rms_weight.? += weight;
     }
 
     if (new_silero_vad) |new_val| {
