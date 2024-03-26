@@ -63,6 +63,7 @@ pub fn build(b: *Build) !void {
     try addDeepFilterNet(test_exe, common_options);
     try addKissFFT(test_exe, common_options);
     try addOnnx(test_exe, common_options);
+    try addDuckDb(test_exe, common_options);
     // Tests won't be installed, we can't rely on relative RPATH
     test_exe.each_lib_rpath = true;
 
@@ -101,12 +102,12 @@ pub fn build(b: *Build) !void {
         .target = target,
         .optimize = optimize,
     });
-
     try addClap(sim_exe, common_options);
     try addSndfile(sim_exe, common_options);
     try addKissFFT(sim_exe, common_options);
     try addOnnx(sim_exe, common_options);
     try addDeepFilterNet(sim_exe, common_options);
+    try addDuckDb(sim_exe, common_options);
 
     const sim_exe_install = b.addInstallArtifact(sim_exe, .{});
     b.getInstallStep().dependOn(&sim_exe_install.step);
@@ -249,35 +250,45 @@ fn addDuckDb(exe: *Build.Step.Compile, options: CommonOptions) !void {
     const duckdb_release = "v0.10.1";
     const platform_dir = "linux-amd64";
 
-    const lib_root = try std.fs.path.join(b.allocator, &.{ b.pathFromRoot("lib"), "libduckdb", platform_dir });
+    const lib_root_for_platform = b.pathJoin(&.{ b.pathFromRoot("lib"), "libduckdb", platform_dir });
     const dynlib_name = "libduckdb.so";
-    const dynlib_src_path = try std.fs.path.join(b.allocator, &.{ lib_root, dynlib_name });
 
-    // This step download libduckdb in `lib/` directory
-    const cmd = b.addSystemCommand(&.{
-        "bash",
-        b.pathFromRoot("lib/libduckdb/update.sh"),
-        duckdb_release,
-    });
-    cmd.expectExitCode(0);
-    // _ = cmd.captureStdOut(); // This combined with has_side_effects=true results in "attempt to use null value" with 0.12.0-dev.3397+43edd53c3
-    cmd.has_side_effects = true;
+    // This step downloads libduckdb in `lib/` directory
+    {
+        const cmd = b.addSystemCommand(&.{
+            "bash",
+            b.pathFromRoot("lib/libduckdb/update.sh"),
+            duckdb_release,
+        });
+        cmd.expectExitCode(0);
+        cmd.has_side_effects = true;
+        // _ = cmd.captureStdOut(); // This combined with has_side_effects=true results in "attempt to use null value" with 0.12.0-dev.3397+43edd53c3
+        exe.step.dependOn(&cmd.step);
+    }
 
-    exe.step.dependOn(&cmd.step);
+    // Add zuckdb driver
+    {
+        const zuckdb = b.dependency("zuckdb", .{
+            .target = options.target,
+            .optimize = options.optimize,
+        }).module("zuckdb");
 
-    const zuckdb = b.dependency("zuckdb", .{
-        .target = options.target,
-        .optimize = options.optimize,
-    }).module("zuckdb");
+        zuckdb.addIncludePath(.{ .path = lib_root_for_platform });
 
-    zuckdb.addIncludePath(.{ .path = b.pathFromRoot("lib/libduckdb") });
-    exe.root_module.addImport("zuckdb", zuckdb);
-    try setRPath(exe);
+        exe.addLibraryPath(.{ .path = lib_root_for_platform });
+        exe.linkSystemLibrary("duckdb");
+
+        exe.root_module.addImport("zuckdb", zuckdb);
+        try setRPath(exe);
+    }
 
     // Copy libs to output directory
-    const dst_rel_path = try std.fs.path.join(b.allocator, &.{ "lib", dynlib_name });
-    const install_shared_lib = b.addInstallBinFile(.{ .path = dynlib_src_path }, dst_rel_path);
-    exe.step.dependOn(&install_shared_lib.step);
+    {
+        const dynlib_path = b.pathJoin(&.{ lib_root_for_platform, dynlib_name });
+        const out_rel_path = b.pathJoin(&.{ "lib", dynlib_name });
+        const install_shared_lib = b.addInstallBinFile(.{ .path = dynlib_path }, out_rel_path);
+        exe.step.dependOn(&install_shared_lib.step);
+    }
 }
 
 fn copySharedObjectsWithSymlinks(b: *Build, src_path: []const u8, dst_path: []const u8) *Build.Step.Run {
