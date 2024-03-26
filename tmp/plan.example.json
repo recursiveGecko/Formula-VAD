@@ -13,8 +13,6 @@
   ],
   "config": {
     "vad_config": {},
-    "output_dir": "sim-out",
-    "preload_audio": false,
-    "audio_read_frame_count": 48000
+    "output_dir": "sim-out"
   }
 }
