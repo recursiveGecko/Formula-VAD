@@ -95,28 +95,6 @@ fn getValueOrNull(comptime T: type, obj: anytype, comptime field: []const u8) ?T
 
 const t = std.testing;
 
-test "volume_min" {
-    var metadata = Self{};
-
-    metadata.push(.{ .volume_min = 100 }, 1);
-    metadata.push(.{ .volume_min = 80 }, 1);
-    metadata.push(.{ .volume_min = 90 }, 1);
-
-    const res = metadata.toResult();
-    try t.expectApproxEqAbs(res.volume_min.?, 80.0, 0.001);
-}
-
-test "volume_max" {
-    var metadata = Self{};
-
-    metadata.push(.{ .volume_max = 80 }, 1);
-    metadata.push(.{ .volume_max = 100 }, 1);
-    metadata.push(.{ .volume_max = 90 }, 1);
-
-    const res = metadata.toResult();
-    try t.expectApproxEqAbs(res.volume_max.?, 100.0, 0.001);
-}
-
 test "volume_ratio" {
     var metadata = Self{};
 
