@@ -37,7 +37,7 @@ pub fn init(
 
     const onnx_opts = onnx.OnnxInstanceOpts{
         .log_id = "ZIG",
-        .log_level = .warning,
+        .log_level = .@"error",
         .model_path = "data/silero_vad.onnx",
         .input_names = &.{ "input", "sr", "h", "c" },
         .output_names = &.{ "output", "hn", "cn" },
