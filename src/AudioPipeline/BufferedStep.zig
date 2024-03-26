@@ -330,11 +330,17 @@ pub fn connectTo(self: *Self, other: *Self) !void {
     }
 
     if (our_config.out_channels != their_config.in_channels) {
-        return error.ChannelCountMismatch;
+        std.debug.panic(
+            "Channel count mismatch: {s} ({d}) -> {s} ({d})",
+            .{ self.name, our_config.out_channels, other.name, their_config.in_channels },
+        );
     }
 
     if (our_config.out_sample_rate != their_config.in_sample_rate) {
-        return error.SampleRateMismatch;
+        std.debug.panic(
+            "Sample rate mismatch: {s} ({d}) -> {s} ({d})",
+            .{ self.name, our_config.out_sample_rate, other.name, their_config.in_sample_rate },
+        );
     }
 
     self.next = other;
