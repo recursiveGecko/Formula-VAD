@@ -53,7 +53,7 @@ pub fn open(allocator: Allocator, path: []const u8) !Self {
 /// Returns an error if the destination is full, callers should close the stream
 /// when the number of frames read is less than the number of frames expected.
 ///
-pub fn read(self: *Self, result_pcm: [][]f32, result_offset: usize, max_frames: usize) !usize {
+pub fn read(self: *const Self, result_pcm: []const []f32, result_offset: usize, max_frames: usize) !usize {
     if (self.sf_file == null) {
         return error.FileNotOpen;
     }
