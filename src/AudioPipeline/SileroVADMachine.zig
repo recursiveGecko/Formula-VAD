@@ -24,6 +24,7 @@ pub const Result = struct {
 
     recording_state: RecordingState,
     sample_number: u64,
+    instant_silero_vad: f32,
 };
 
 const on_threshold: f32 = 0.5;
@@ -99,6 +100,7 @@ pub fn run(
                 return Result{
                     .recording_state = .started,
                     .sample_number = self.getOffsetRecordingStart(self.start_sample.?),
+                    .instant_silero_vad = vad,
                 };
             }
         },
@@ -116,7 +118,11 @@ pub fn run(
                 // speech resumed
                 self.status = if (self.awaiting_close) .open else .opening;
                 self.end_sample = null;
-                return Result{ .recording_state = .none, .sample_number = 0 };
+                return Result{
+                    .recording_state = .none,
+                    .sample_number = 0,
+                    .instant_silero_vad = vad,
+                };
             }
 
             // silence since last speech
@@ -146,6 +152,7 @@ pub fn run(
                     return Result{
                         .recording_state = .completed,
                         .sample_number = self.getOffsetRecordingEnd(end_sample),
+                        .instant_silero_vad = vad,
                     };
                 } else {
                     // intentionally blank, VAD was "opening" but didn't meet the criteria
@@ -154,7 +161,11 @@ pub fn run(
         },
     }
 
-    return Result{ .recording_state = .none, .sample_number = 0 };
+    return Result{
+        .recording_state = .none,
+        .sample_number = 0,
+        .instant_silero_vad = vad,
+    };
 }
 
 /// Add a couple of seconds of margin to the start of the segment

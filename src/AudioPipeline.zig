@@ -16,6 +16,7 @@ const BufferedMixer = @import("./AudioPipeline/BufferedMixer.zig");
 const BufferedFFT = @import("./AudioPipeline/BufferedFFT.zig");
 const BufferedRecorder = @import("./AudioPipeline/BufferedRecorder.zig");
 const BufferedSileroVAD = @import("./AudioPipeline/BufferedSileroVAD.zig");
+const DataLogger = @import("./DataLogger.zig");
 
 const Self = @This();
 
@@ -40,6 +41,8 @@ pub const Config = struct {
     sample_rate: usize,
     n_channels: usize,
     vad_config: VADConfig = .{},
+    /// Caller continues to own the DataLogger connection and must close it when done
+    data_logger: ?*DataLogger.Conn = null,
     record: RecordingTarget,
 };
 
@@ -63,6 +66,7 @@ b_denoiser: *BufferedDFNDenoiser,
 b_denoiser_recorder: *BufferedRecorder,
 b_fft: *BufferedFFT,
 b_silero_vad: *BufferedSileroVAD,
+data_logger: ?*DataLogger.Conn,
 // Speech state machine
 vad_machine: SileroVADMachine,
 
@@ -84,6 +88,7 @@ pub fn init(
         .config = config,
         .allocator = allocator,
         .callbacks = callbacks,
+        .data_logger = config.data_logger,
         .recording_coordinator = undefined,
         .b_first_step = undefined,
         .b_original_recorder = undefined,
@@ -111,8 +116,8 @@ pub fn init(
     self.b_mixer = try BufferedMixer.init(
         allocator,
         "mixer",
-        self.b_original_recorder.audio_config.out_sample_rate,
-        2,
+        self.b_original_recorder.step.audio_config.out_sample_rate,
+        self.b_original_recorder.step.audio_config.out_channels,
         true,
     );
     errdefer self.b_mixer.deinit();
@@ -121,7 +126,7 @@ pub fn init(
         allocator,
         "denoiser",
         config.vad_config.denoiser_model_path,
-        self.b_mixer.audio_config.out_sample_rate,
+        self.b_mixer.step.audio_config.out_sample_rate,
         true,
     );
     errdefer self.b_denoiser.deinit();
@@ -188,10 +193,6 @@ pub fn deinit(self: *Self) void {
     self.allocator.destroy(self);
 }
 
-pub fn totalWriteCount(self: *const Self) u64 {
-    return self.ring_buffer.total_write_count;
-}
-
 pub fn pushSamples(self: *Self, channel_pcm: []const []const f32) !u64 {
     const segment = Segment.wrapChannelPcmBuf(self.write_index, channel_pcm);
     self.write_index += segment.length();
@@ -234,6 +235,14 @@ fn handleFFTResult(
         },
         .none => {},
     }
+
+    if (self.data_logger) |dl| {
+        try dl.logVAD(.{
+            .fft = fft_result,
+            .output = buffered_step_output,
+            .silero_vad = vad_result.instant_silero_vad,
+        });
+    }
 }
 
 pub fn onRecording(
@@ -252,6 +261,10 @@ pub fn onRecording(
 //
 // Tests
 //
+
+test {
+    std.testing.refAllDecls(@This());
+}
 
 test "simple leak test" {
     var pipeline = try init(
