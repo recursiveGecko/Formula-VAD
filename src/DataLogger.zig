@@ -207,14 +207,14 @@ const schema =
     \\  fft_band_700_900 FLOAT4 NOT NULL
     \\);
     \\
-    \\CREATE SEQUENCE 'stream_info_id_seq';
+    \\CREATE SEQUENCE IF NOT EXISTS 'stream_info_id_seq';
     \\CREATE TABLE IF NOT EXISTS stream_info (
     \\  id INTEGER PRIMARY KEY DEFAULT nextval('stream_info_id_seq'),
     \\  name VARCHAR NOT NULL,
     \\  sample_rate INTEGER NOT NULL
     \\);
     \\
-    \\CREATE SEQUENCE 'reference_segments_id_seq';
+    \\CREATE SEQUENCE IF NOT EXISTS 'reference_segments_id_seq';
     \\CREATE TABLE IF NOT EXISTS reference_segments (
     \\  id INTEGER PRIMARY KEY DEFAULT nextval('reference_segments_id_seq'),
     \\  stream_info_id INTEGER NOT NULL,
@@ -222,7 +222,7 @@ const schema =
     \\  to_sample INTEGER NOT NULL
     \\);
     \\
-    \\CREATE SEQUENCE 'detected_segments_id_seq';
+    \\CREATE SEQUENCE IF NOT EXISTS 'detected_segments_id_seq';
     \\CREATE TABLE IF NOT EXISTS detected_segments (
     \\  id INTEGER PRIMARY KEY DEFAULT nextval('detected_segments_id_seq'),
     \\  stream_info_id INTEGER NOT NULL,
@@ -231,7 +231,7 @@ const schema =
     \\);
     \\
     \\-- vad_data joined with detected segments
-    \\CREATE VIEW detected_segment_vad_data AS
+    \\CREATE OR REPLACE VIEW detected_segment_vad_data AS
     \\  SELECT ds.id as ds_id, ds.from_sample, ds.to_sample, vd.*
     \\  FROM detected_segments ds
     \\  INNER JOIN vad_data vd ON
@@ -241,7 +241,7 @@ const schema =
     \\;
     \\
     \\-- vad_data joined with reference segments
-    \\CREATE VIEW ref_segment_vad_data AS
+    \\CREATE OR REPLACE VIEW ref_segment_vad_data AS
     \\  SELECT rs.id as rs_id, rs.from_sample, rs.to_sample, vd.*
     \\  FROM reference_segments rs
     \\  INNER JOIN vad_data vd ON
@@ -253,7 +253,7 @@ const schema =
     \\-- all segments overlapped with each another (per-stream), this doesn't take into account the fact that 
     \\-- one reference segment could correspond to multiple detected segments or vice versa, 
     \\-- this means that early/late start/end calculations won't make sense in those cases unless they're processed further.
-    \\CREATE VIEW overlapped_segments AS
+    \\CREATE OR REPLACE VIEW overlapped_segments AS
     \\  SELECT ds.stream_info_id AS si_id,
     \\          ds.from_sample AS det_from,
     \\          ds.to_sample AS det_to,
@@ -275,7 +275,7 @@ const schema =
     \\;
     \\
     \\-- detected segments that were incorrectly detected by VAD (no overlap with reference segments)
-    \\CREATE VIEW false_positives AS
+    \\CREATE OR REPLACE VIEW false_positives AS
     \\  SELECT si.id AS si_id,
     \\      os.det_from AS from,
     \\      os.det_to AS to,
@@ -290,7 +290,7 @@ const schema =
     \\;
     \\
     \\-- reference segments that were completely missed by VAD (no overlap with detected segments)
-    \\CREATE VIEW false_negatives AS
+    \\CREATE OR REPLACE VIEW false_negatives AS
     \\  SELECT si.id AS si_id,
     \\      os.ref_from as from,
     \\      os.ref_to as to,
@@ -304,7 +304,7 @@ const schema =
     \\  HAVING MAX(overlap) = 0
     \\;
     \\
-    \\CREATE VIEW false_positive_stats AS
+    \\CREATE OR REPLACE VIEW false_positive_stats AS
     \\  SELECT f.si_id, f.from, f.to, median(silero_vad)*100 as silero_vad_median, median(volume_rms)*100 as silero_vad_median
     \\  FROM false_positives f
     \\  INNER JOIN vad_data vd ON vd.stream_info_id = f.si_id AND vd.sample_number BETWEEN f.from AND f.to
