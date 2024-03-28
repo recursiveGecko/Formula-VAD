@@ -257,7 +257,9 @@ fn onSpeechEnd(self: *Self) !Result {
     if (speech_duration_met) {
         const segment = AudioPipeline.SpeechSegment{
             .sample_from = self.getOffsetRecordingStart(sample_from),
+            .detected_sample_from = sample_from,
             .sample_to = self.getOffsetRecordingEnd(sample_to),
+            .detected_sample_to = sample_to,
             .avg_channel_vol_ratio = avg_channel_vol_ratio,
             .vad_met_sec = self.vad_threshold_met_cumulative_sec,
         };
