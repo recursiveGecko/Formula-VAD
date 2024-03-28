@@ -32,8 +32,10 @@ pub const Callbacks = struct {
 pub const Config = struct {
     pub const VADConfig = struct {
         fft_size: usize = 1024,
+        // TODO: used to be 20
+        attenuation: f32 = 30,
         vad_machine_config: VADMachine.Config = .{},
-        denoiser_model_path: ?[:0]const u8 = null,
+        denoiser_model_path: [:0]const u8 = "data/DeepFilterNet3_onnx.tar.gz",
     };
 
     pub const RecordingTarget = enum { all, original, none };
@@ -129,6 +131,7 @@ pub fn init(
     self.b_denoiser = try BufferedDFNDenoiser.init(
         allocator,
         "denoiser",
+        config.vad_config.attenuation,
         config.vad_config.denoiser_model_path,
         self.b_mixer.step.audio_config.out_sample_rate,
         true,

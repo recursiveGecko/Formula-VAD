@@ -8,8 +8,6 @@ const DeepFilterNet = @import("../DeepFilterNet.zig");
 
 const Self = @This();
 
-const default_model_path = "data/DeepFilterNet3_onnx.tar.gz";
-
 allocator: Allocator,
 denoiser: DeepFilterNet,
 out_segment: Segment,
@@ -20,14 +18,15 @@ step: *BufferedStep,
 pub fn init(
     allocator: Allocator,
     name: []const u8,
-    model_path: ?[:0]const u8,
+    attenuation: f32,
+    model_path: [:0]const u8,
     in_sample_rate: usize,
     expect_output: bool,
 ) !*Self {
     var self = try allocator.create(Self);
     errdefer allocator.destroy(self);
 
-    var denoiser = try DeepFilterNet.init(allocator, in_sample_rate, model_path orelse default_model_path);
+    var denoiser = try DeepFilterNet.init(allocator, in_sample_rate, attenuation, model_path);
     errdefer denoiser.deinit();
 
     var out_segment = try Segment.initWithCapacity(

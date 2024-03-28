@@ -17,6 +17,7 @@ df_state: *df.DFState,
 pub fn init(
     allocator: std.mem.Allocator,
     sample_rate: usize,
+    attenuation: f32,
     model_path: [:0]const u8,
 ) !Self {
     if (sample_rate != 48000) {
@@ -24,10 +25,7 @@ pub fn init(
         return error.UnsupportedSampleRate;
     }
 
-    // 0 - 100
-    const attenuation = 20;
-
-    const df_state = df.df_create(model_path, attenuation);
+    const df_state = df.df_create(model_path, attenuation, "error");
 
     if (df_state == null) {
         return error.InitializationFailed;

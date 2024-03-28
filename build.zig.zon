@@ -23,8 +23,8 @@
             .hash = "1220eea11a01b53477705a7306fb582e7e6a73bfb2c71d4df178eea7909e44133a90",
         },
         .deepfilternet = .{
-            .url = "https://github.com/recursiveGecko/libdeepfilter-builds/releases/download/release-v0.5.6/libdeepfilter-v0.5.6-x86_64-unknown-linux-gnu.tar.gz",
-            .hash = "1220a3577bcd32675f6e2f5e31774aae55fa50f5e548c5719832b22763579a1af3b6",
+            .url = "https://github.com/recursiveGecko/libdeepfilter-builds/releases/download/prerelease-f2445da10ce7760ac41d272ce4699200333a6e32/libdeepfilter-f2445da1-x86_64-unknown-linux-gnu.tar.gz",
+            .hash = "12200c992606e7c424c1b8d7787be7b6070c5fbe709eeb463a17d3fe8340b3e6f8ac",
         },
         .zuckdb = .{
             .url = "git+https://github.com/karlseguin/zuckdb.zig#30f6122d96581a8b0c4fad162b5fd374708bebc5",
