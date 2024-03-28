@@ -253,19 +253,6 @@ fn addDuckDb(exe: *Build.Step.Compile, options: CommonOptions) !void {
     const lib_root_for_platform = b.pathJoin(&.{ b.pathFromRoot("lib"), "libduckdb", platform_dir });
     const dynlib_name = "libduckdb.so";
 
-    // This step downloads libduckdb in `lib/` directory
-    {
-        const cmd = b.addSystemCommand(&.{
-            "bash",
-            b.pathFromRoot("lib/libduckdb/update.sh"),
-            duckdb_release,
-        });
-        cmd.expectExitCode(0);
-        cmd.has_side_effects = true;
-        // _ = cmd.captureStdOut(); // This combined with has_side_effects=true results in "attempt to use null value" with 0.12.0-dev.3397+43edd53c3
-        exe.step.dependOn(&cmd.step);
-    }
-
     // Add zuckdb driver
     {
         const zuckdb = b.dependency("zuckdb", .{
@@ -282,11 +269,23 @@ fn addDuckDb(exe: *Build.Step.Compile, options: CommonOptions) !void {
         try setRPath(exe);
     }
 
-    // Copy libs to output directory
     {
+        // downloads libduckdb to `lib/` directory
+        const update_lib = b.addSystemCommand(&.{
+            "bash",
+            b.pathFromRoot("lib/libduckdb/update.sh"),
+            duckdb_release,
+        });
+        update_lib.expectExitCode(0);
+        update_lib.has_side_effects = true;
+        // _ = cmd.captureStdOut(); // This combined with has_side_effects=true results in "attempt to use null value" with 0.12.0-dev.3397+43edd53c3
+        exe.step.dependOn(&update_lib.step);
+
+        // Copy libs to output directory
         const dynlib_path = b.pathJoin(&.{ lib_root_for_platform, dynlib_name });
         const out_rel_path = b.pathJoin(&.{ "lib", dynlib_name });
         const install_shared_lib = b.addInstallBinFile(.{ .path = dynlib_path }, out_rel_path);
+        install_shared_lib.step.dependOn(&update_lib.step);
         exe.step.dependOn(&install_shared_lib.step);
     }
 }
