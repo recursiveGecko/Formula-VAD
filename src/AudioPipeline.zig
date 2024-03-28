@@ -47,8 +47,12 @@ pub const Config = struct {
 };
 
 pub const SpeechSegment = struct {
-    sample_from: usize,
-    sample_to: usize,
+    /// Reported values (to give some buffer and ensure we don't cut off speech)
+    sample_from: u64,
+    sample_to: u64,
+    /// Actual values
+    detected_sample_from: u64,
+    detected_sample_to: u64,
     avg_channel_vol_ratio: f32,
     vad_met_sec: f32,
 };

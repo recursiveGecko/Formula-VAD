@@ -143,6 +143,8 @@ pub fn run(
                     const segment = AudioPipeline.SpeechSegment{
                         .sample_from = self.getOffsetRecordingStart(start_sample),
                         .sample_to = self.getOffsetRecordingEnd(end_sample),
+                        .detected_sample_from = start_sample,
+                        .detected_sample_to = end_sample,
                         // TODO: Remove these?
                         .avg_channel_vol_ratio = 0,
                         .vad_met_sec = 0,

@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const audio_utils = @import("../audio_utils.zig");
 const AudioPipeline = @import("../AudioPipeline.zig");
 const AudioFileStream = @import("../audio_utils/AudioFileStream.zig");
 const AudioBuffer = @import("../audio_utils/AudioBuffer.zig");
@@ -86,6 +87,8 @@ thread_gpa: std.heap.GeneralPurposeAllocator(.{
 }),
 main_thread_allocator: Allocator,
 data_logger_conn: ?*DataLogger.Conn,
+progress: f32 = 0,
+mutex: std.Thread.Mutex = .{},
 
 pub fn init(
     arena_alloc: Allocator,
@@ -205,6 +208,10 @@ fn simulateVAD(self: *Self) ![]AudioPipeline.SpeechSegment {
     const vad_segments = try pipeline.vad_machine.vad_segments.toOwnedSlice();
     errdefer instance_alloc.free(vad_segments);
 
+    if (self.data_logger_conn) |conn| {
+        try conn.insertDetectedSegments(vad_segments);
+    }
+
     return vad_segments;
 }
 
@@ -217,19 +224,10 @@ pub fn storeResult(
     const sample_rate = self.audio_stream.sample_rate;
 
     for (vad_segments, 0..) |vad_segment, i| {
-        const from_sec = @as(f32, @floatFromInt(vad_segment.sample_from)) / @as(f32, @floatFromInt(sample_rate));
-        const to_sec = @as(f32, @floatFromInt(vad_segment.sample_to)) / @as(f32, @floatFromInt(sample_rate));
-
-        // const debug_info = try std.fmt.allocPrint(
-        //     self.main_thread_allocator,
-        //     "vr:{d:.2} vad:{d:.1}s",
-        //     .{ vad_segment.avg_channel_vol_ratio, vad_segment.vad_met_sec },
-        // );
-
-        speech_segments[i] = .{
+        speech_segments[i] = Evaluator.SpeechSegment{
             .side = .vad,
-            .from_sec = from_sec,
-            .to_sec = to_sec,
+            .from_sec = audio_utils.sampleNumberToSeconds(vad_segment.sample_from, sample_rate),
+            .to_sec = audio_utils.sampleNumberToSeconds(vad_segment.sample_to, sample_rate),
             .debug_info = null,
         };
     }
