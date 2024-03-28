@@ -7,8 +7,7 @@
       "request": "launch",
       "name": "Debug - Formula-VAD",
       "program": "${workspaceFolder}/zig-out/bin/formula-vad",
-      "args": [
-      ],
+      "args": [],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Build formula-vad.zig"
     },
@@ -17,8 +16,7 @@
       "request": "launch",
       "name": "Debug - Formula-VAD (Tests)",
       "program": "${workspaceFolder}/zig-out/bin/formula-vad-test",
-      "args": [
-      ],
+      "args": [],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Build formula-vad.zig"
     },
@@ -28,10 +26,36 @@
       "name": "Debug - Formula-VAD (Simulator)",
       "program": "${workspaceFolder}/zig-out/bin/simulator",
       "args": [
-        "-i", "tmp/plan.small.json",
+        "-i",
+        "tmp/plan.small.json",
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Build formula-vad.zig"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Simulator - Debug (plan.small.json)",
+      "program": "${workspaceFolder}/zig-out/bin/simulator",
+      "args": [
+        "-i",
+        "tmp/plan.small.json",
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build formula-vad.zig (ReleaseSafe)"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Simulator - ReleaseSafe + datalog (plan.json)",
+      "program": "${workspaceFolder}/zig-out/bin/simulator",
+      "args": [
+        "-i",
+        "tmp/plan.json",
+        "--data-log"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build formula-vad.zig (ReleaseSafe)"
     },
   ]
 }
