@@ -7,6 +7,7 @@ pub const SpeechSegment = @import("./Evaluator/SpeechSegment.zig");
 pub const statistics = @import("./Evaluator/statistics.zig");
 pub const formats = @import("./Evaluator/formats.zig");
 pub const report_generator = @import("./simulator/report_generator.zig");
+const simulator = @import("./simulator.zig");
 const exit = std.process.exit;
 const stderr = std.io.getStdErr();
 const stdout = std.io.getStdOut();
@@ -33,11 +34,6 @@ const ResultJson = struct {
     FDR: f32,
 };
 
-const Self = @This();
-allocator: Allocator,
-input_segments: []SpeechSegment,
-reference_segments: []SpeechSegment,
-
 /// Entrypoint for CLI invocation
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -46,7 +42,7 @@ pub fn main() !void {
 
     const arg_parsers = .{
         .path = clap.parsers.string,
-        .format = clap.parsers.enumeration(enum { plain, json }),
+        .format = clap.parsers.enumeration(report_generator.Format),
     };
 
     var diag = clap.Diagnostic{};
@@ -83,17 +79,12 @@ pub fn main() !void {
     const ref_segments = try readParseAudacitySegments(allocator, ref_file_path.?, SpeechSegment.Side.ref);
     defer allocator.free(ref_segments);
 
-    var evaluator = try Self.initAndRun(allocator, input_segments, ref_segments);
-    defer evaluator.deinit();
+    var stat_config = simulator.static_sim_config.stat_config;
+    // TODO: Make configurable
+    stat_config.ignore_shorter_than_sec = 0.7;
 
-    const stat_config = statistics.StatConfig{
-        // TODO: Make this configurable?
-        // it should match whatever the VAD algorithm uses by design
-        // for most accurate results
-        .ignore_shorter_than_sec = 0.7,
-    };
-
-    const stats = try statistics.fromEvaluator(evaluator, stat_config);
+    const result = try evaluate(allocator, stat_config, input_segments, ref_segments);
+    const stats = result.stats;
 
     switch (format) {
         .plain => {
@@ -133,38 +124,50 @@ fn printHelp() !void {
     try clap.help(stdout.writer(), clap.Help, &params, .{});
 }
 
-pub fn initAndRun(
+pub const Result = struct {
     allocator: Allocator,
-    input: []const SpeechSegment,
-    reference: []const SpeechSegment,
-) !Self {
-    const input_copy = try allocator.alloc(SpeechSegment, input.len);
-    errdefer allocator.free(input_copy);
+    /// Name must be freed by the caller who assigns it.
+    name: ?[]const u8 = null,
+    input_segments: []const SpeechSegment,
+    ref_segments: []const SpeechSegment,
+    stats: statistics.SingleStats,
 
-    const reference_copy = try allocator.alloc(SpeechSegment, reference.len);
-    errdefer allocator.free(reference_copy);
+    pub fn deinit(self: *Result) void {
+        for (self.input_segments) |s| {
+            if (s.opposite_segments) |opposite_segments| self.allocator.free(opposite_segments);
+        }
+        for (self.ref_segments) |s| {
+            if (s.opposite_segments) |opposite_segments| self.allocator.free(opposite_segments);
+        }
+        self.allocator.free(self.input_segments);
+        self.allocator.free(self.ref_segments);
+    }
+};
 
-    @memcpy(input_copy, input);
-    @memcpy(reference_copy, reference);
+pub fn evaluate(
+    allocator: Allocator,
+    stat_config: statistics.StatConfig,
+    input_: []const SpeechSegment,
+    reference_: []const SpeechSegment,
+) !Result {
+    const input_segments = try allocator.alloc(SpeechSegment, input_.len);
+    const ref_segments = try allocator.alloc(SpeechSegment, reference_.len);
 
-    const self = Self{
-        .allocator = allocator,
-        .input_segments = input_copy,
-        .reference_segments = reference_copy,
-    };
+    @memcpy(input_segments, input_);
+    @memcpy(ref_segments, reference_);
 
-    std.mem.sort(SpeechSegment, input_copy, {}, SpeechSegment.sortByStart);
-    std.mem.sort(SpeechSegment, reference_copy, {}, SpeechSegment.sortByStart);
+    std.mem.sort(SpeechSegment, input_segments, {}, SpeechSegment.sortByStart);
+    std.mem.sort(SpeechSegment, ref_segments, {}, SpeechSegment.sortByStart);
 
-    for (0..input_copy.len) |i| input_copy[i].id = @intCast(i + 1);
-    for (0..reference_copy.len) |i| reference_copy[i].id = @intCast(i + 1);
+    for (0..input_segments.len) |i| input_segments[i].id = @intCast(i + 1);
+    for (0..ref_segments.len) |i| ref_segments[i].id = @intCast(i + 1);
 
     var prev: ?*SpeechSegment = null;
-    for (self.input_segments) |*input_segment| {
+    for (input_segments) |*input_segment| {
         const overlapping: []*SpeechSegment = try SpeechSegment.findOverlapping(
-            self.allocator,
+            allocator,
             input_segment,
-            self.reference_segments,
+            ref_segments,
         );
         input_segment.opposite_segments = overlapping;
 
@@ -180,11 +183,11 @@ pub fn initAndRun(
 
     prev = null;
 
-    for (self.reference_segments) |*ref_segment| {
+    for (ref_segments) |*ref_segment| {
         const overlapping: []*SpeechSegment = try SpeechSegment.findOverlapping(
-            self.allocator,
+            allocator,
             ref_segment,
-            self.input_segments,
+            input_segments,
         );
         ref_segment.opposite_segments = overlapping;
 
@@ -198,24 +201,13 @@ pub fn initAndRun(
         prev = ref_segment;
     }
 
-    return self;
-}
-
-pub fn deinit(self: *Self) void {
-    for (self.input_segments) |s| {
-        if (s.opposite_segments) |opposite_segments| {
-            self.allocator.free(opposite_segments);
-        }
-    }
-
-    for (self.reference_segments) |s| {
-        if (s.opposite_segments) |opposite_segments| {
-            self.allocator.free(opposite_segments);
-        }
-    }
-
-    self.allocator.free(self.input_segments);
-    self.allocator.free(self.reference_segments);
+    const stats = try statistics.calculate(allocator, stat_config, input_segments, ref_segments);
+    return Result{
+        .allocator = allocator,
+        .input_segments = input_segments,
+        .ref_segments = ref_segments,
+        .stats = stats,
+    };
 }
 
 pub fn readParseAudacitySegments(

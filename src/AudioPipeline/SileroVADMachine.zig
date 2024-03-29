@@ -75,14 +75,26 @@ pub fn run(
     fft_result: *const BufferedFFT.FFTResult,
 ) !Result {
     _ = fft_result; // autofix
-    const cfg = self.config;
 
-    const first_sample_index = prev_result.segment.index;
-    const last_sample_index = first_sample_index + prev_result.segment.length() - 1;
     std.debug.assert(prev_result.segment.nChannels() == 1);
 
+    const first_sample_index = prev_result.segment.index;
+    const length = prev_result.segment.length();
+    const silero_vad = prev_result.metadata.silero_vad.?;
+
+    return self.run2(first_sample_index, length, silero_vad);
+}
+
+pub fn run2(
+    self: *SileroVADMachine,
+    first_sample_index: u64,
+    length: u64,
+    vad: f32,
+) !Result {
+    const cfg = self.config;
+
+    const last_sample_index = first_sample_index + length - 1;
     const in_sample_rate = self.sample_rate;
-    const vad = prev_result.metadata.silero_vad.?;
 
     // std.debug.print("{d:5.3}\n", .{vad});
 
@@ -184,7 +196,7 @@ pub fn run(
 }
 
 /// Add a couple of seconds of margin to the start of the segment
-pub fn getOffsetRecordingStart(self: SileroVADMachine, vad_from: u64) u64 {
+fn getOffsetRecordingStart(self: SileroVADMachine, vad_from: u64) u64 {
     const cfg = self.config;
 
     const sample_rate = self.sample_rate;
@@ -197,7 +209,7 @@ pub fn getOffsetRecordingStart(self: SileroVADMachine, vad_from: u64) u64 {
 }
 
 /// Add a couple of seconds of margin to the end of the segment
-pub fn getOffsetRecordingEnd(self: SileroVADMachine, vad_to: u64) u64 {
+fn getOffsetRecordingEnd(self: SileroVADMachine, vad_to: u64) u64 {
     const cfg = self.config;
 
     const sample_rate = self.sample_rate;

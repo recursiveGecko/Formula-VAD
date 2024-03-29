@@ -20,12 +20,15 @@ const Self = @This();
 const SimulationInstance = @This();
 
 pub const Opts = struct {
-    base_path: []const u8,
-    output_dir: ?[]const u8,
     instance_json: SimulationInstanceJSON,
+    /// Path of directory containing plan.json
+    base_path: []const u8,
+    /// Output directory for this instance
+    output_dir: ?[]const u8,
     sim_config: DynamicSimConfig,
     cli_args: simulator.CLIArgs,
     data_logger: ?DataLogger,
+    stat_config: Evaluator.statistics.StatConfig,
 };
 
 // Wraps the pipeline context that is required for AudioPipeline callbacks
@@ -79,7 +82,7 @@ const PipelineContext = struct {
 name: []const u8,
 audio_stream: AudioFileStream,
 reference_segments: []const Evaluator.SpeechSegment,
-evaluator: ?Evaluator = null,
+vad_segments: ?[]const Evaluator.SpeechSegment = null,
 opts: Opts,
 thread_gpa: std.heap.GeneralPurposeAllocator(.{
     .verbose_log = static_sim_config.verbose_allocation_log,
@@ -87,6 +90,7 @@ thread_gpa: std.heap.GeneralPurposeAllocator(.{
 }),
 main_thread_allocator: Allocator,
 data_logger_conn: ?*DataLogger.Conn,
+eval_result: ?Evaluator.Result = null,
 progress: f32 = 0,
 mutex: std.Thread.Mutex = .{},
 
@@ -104,7 +108,8 @@ pub fn init(
 
     var data_logger_conn: ?*DataLogger.Conn = null;
     if (opts.data_logger) |*dl| {
-        data_logger_conn = try dl.connect(.{
+        data_logger_conn = try dl.connect();
+        try data_logger_conn.?.initStreamInfo(.{
             .name = name,
             .sample_rate = audio_stream.sample_rate,
         });
@@ -116,7 +121,6 @@ pub fn init(
         .audio_stream = audio_stream,
         .reference_segments = ref_segments,
         .data_logger_conn = data_logger_conn,
-        .evaluator = null,
         .opts = opts,
         .main_thread_allocator = arena_alloc,
         .thread_gpa = .{},
@@ -125,6 +129,7 @@ pub fn init(
 
 pub fn deinit(self: *@This()) void {
     if (self.data_logger_conn) |dl| dl.deinit();
+    if (self.eval_result) |*er| er.deinit();
     self.audio_stream.close();
 }
 
@@ -233,5 +238,11 @@ pub fn storeResult(
         };
     }
 
-    self.evaluator = try Evaluator.initAndRun(self.main_thread_allocator, speech_segments, self.reference_segments);
+    self.eval_result = try Evaluator.evaluate(
+        self.main_thread_allocator,
+        self.opts.stat_config,
+        speech_segments,
+        self.reference_segments,
+    );
+    self.eval_result.?.name = self.name;
 }

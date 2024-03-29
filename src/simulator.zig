@@ -28,11 +28,20 @@ pub const std_options: std.Options = .{
     },
 };
 
+/// Hardcoded simulator config
 const StaticSimConfig = struct {
     verbose_allocation_log: bool = false,
+    stat_config: Evaluator.statistics.StatConfig = .{
+        // Should be overriden during evaluation to match VAD machine config
+        .ignore_shorter_than_sec = 999999,
+        .extrude_start = 3,
+        .extrude_end = 2,
+        .fill_gaps = 3,
+    },
 };
 pub const static_sim_config = StaticSimConfig{};
 
+/// Simulator config read from plan.json
 pub const DynamicSimConfig = struct {
     pre_vad_config: AudioPipeline.Config.PreVADConfig = .{},
     vad_config: AudioPipeline.Config.VADConfig = .{},
@@ -131,14 +140,12 @@ pub fn main() !void {
 
     try runAll(arena_alloc, simulation);
 
-    const stat_config = Evaluator.statistics.StatConfig{
-        .ignore_shorter_than_sec = simulation.config.vad_config.min_speech_duration_ms / 1000,
-        .extrude_start = 5,
-        .extrude_end = 10,
-        .fill_gaps = 5,
-    };
+    const results = try arena_alloc.alloc(Evaluator.Result, simulation.instances.len);
+    for (simulation.instances, 0..) |instance, i| {
+        results[i] = instance.eval_result.?;
+    }
 
-    const report = try report_generator.bufPrintSimulationReport(arena_alloc, simulation.*, stat_config);
+    const report = try report_generator.bufPrintSimulationReport(arena_alloc, results, .plain);
 
     try stdout_w.writeAll(report);
 
@@ -205,6 +212,9 @@ pub fn initialize(arena_alloc: Allocator, gpa_alloc: Allocator, cli_args: CLIArg
             break :val instance_out_dir;
         };
 
+        var stat_config = static_sim_config.stat_config;
+        stat_config.ignore_shorter_than_sec = plan_json.value.config.vad_config.min_speech_duration_ms / 1000;
+
         const opts = SimulationInstance.Opts{
             .base_path = plan_dir_path,
             .output_dir = out_dir,
@@ -212,6 +222,7 @@ pub fn initialize(arena_alloc: Allocator, gpa_alloc: Allocator, cli_args: CLIArg
             .sim_config = plan_json.value.config,
             .cli_args = cli_args,
             .data_logger = data_logger,
+            .stat_config = stat_config,
         };
 
         instances[i] = try SimulationInstance.init(arena_alloc, opts);
@@ -246,14 +257,14 @@ pub fn maybeSaveOutput(arena_alloc: Allocator, simulation: *const Simulation) !b
     const out_dir = simulation.resolved_out_path.?;
 
     for (simulation.instances) |instance| {
-        if (instance.evaluator == null) {
+        if (instance.eval_result == null) {
             log.warn("Not saving output of instance {s} because it doesn't contain a result\n", .{instance.name});
             return false;
         }
 
         const audacity_filename = try std.fmt.allocPrint(arena_alloc, "{s}-audacity.txt", .{instance.name});
         const audacity_path = try fs.path.join(arena_alloc, &.{ out_dir, audacity_filename });
-        const audacity_txt = try Evaluator.formats.serializeEvaluatorToAudacityTxt(arena_alloc, instance.evaluator.?);
+        const audacity_txt = try Evaluator.formats.serializeResultToAudacity(arena_alloc, instance.eval_result.?);
 
         fs.Dir.writeFile(fs.cwd(), audacity_path, audacity_txt) catch |err| {
             log.err("Failed to write Audacity txt: {any}", .{err});

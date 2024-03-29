@@ -39,19 +39,19 @@ pub fn parseAudacitySegments(
     return segments.toOwnedSlice();
 }
 
-pub fn serializeEvaluatorToAudacityTxt(allocator: Allocator, evaluator: Evaluator) ![]const u8 {
+pub fn serializeResultToAudacity(allocator: Allocator, result: Evaluator.Result) ![]const u8 {
     var contents_array = std.ArrayList(u8).init(allocator);
     var writer = contents_array.writer();
     defer contents_array.deinit();
 
-    for (evaluator.input_segments) |segment| {
+    for (result.input_segments) |segment| {
         const comment = try segment.toComment(allocator);
         defer allocator.free(comment);
 
         try writer.print("{d:.4}\t{d:.4}\t{s}\n", .{ segment.from_sec, segment.to_sec, comment });
     }
 
-    for (evaluator.reference_segments) |ref_segment| {
+    for (result.ref_segments) |ref_segment| {
         if (ref_segment.hasMatch()) continue;
 
         const comment = try std.fmt.allocPrint(allocator, "missed {s}", .{ref_segment.debug_info orelse ""});

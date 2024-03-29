@@ -90,45 +90,50 @@ pub const StatConfig = struct {
     fill_gaps: f32 = 0,
 };
 
-pub fn fromEvaluator(eval: Evaluator, config: StatConfig) !SingleStats {
+pub fn calculate(
+    allocator: Allocator,
+    config: StatConfig,
+    input_segments: []SpeechSegment,
+    ref_segments: []SpeechSegment,
+) !SingleStats {
     var stats = SingleStats{};
 
-    for (eval.input_segments) |*segment| {
-        const false_positives_sec = try calcFalsePositiveSec(eval.allocator, segment.*, config);
-        const true_positives_sec = try calcTruePositiveSec(eval.allocator, segment.*, config);
+    for (input_segments) |*segment| {
+        const false_positives_sec = try calcFalsePositiveSec(allocator, segment.*, config);
+        const true_positives_sec = try calcTruePositiveSec(allocator, segment.*, config);
 
         var fp_debug: []const u8 = "";
-        defer if (fp_debug.len > 0) eval.allocator.free(fp_debug);
+        defer if (fp_debug.len > 0) allocator.free(fp_debug);
 
         if (false_positives_sec > 0.01) {
-            fp_debug = try std.fmt.allocPrint(eval.allocator, "FP:{d:.1}s", .{false_positives_sec});
+            fp_debug = try std.fmt.allocPrint(allocator, "FP:{d:.1}s", .{false_positives_sec});
         }
 
         if (segment.opposite_segments.?.len == 0) {
             stats.false_positives_count += 1;
         }
 
-        segment.debug_info = try std.fmt.allocPrint(eval.allocator, "{s}", .{fp_debug});
+        segment.debug_info = try std.fmt.allocPrint(allocator, "{s}", .{fp_debug});
 
         stats.false_positives_sec += false_positives_sec;
         stats.true_positives_sec += true_positives_sec;
         stats.total_positives_sec += true_positives_sec;
     }
 
-    for (eval.reference_segments) |*ref_segment| {
-        const false_negative_sec = try calcFalseNegativeSec(eval.allocator, ref_segment.*, config);
+    for (ref_segments) |*ref_segment| {
+        const false_negative_sec = try calcFalseNegativeSec(allocator, ref_segment.*, config);
 
         var fn_debug: []const u8 = "";
-        defer if (fn_debug.len > 0) eval.allocator.free(fn_debug);
+        defer if (fn_debug.len > 0) allocator.free(fn_debug);
 
         if (false_negative_sec > 0.01) {
-            fn_debug = try std.fmt.allocPrint(eval.allocator, "FN:{d:.1}s", .{false_negative_sec});
+            fn_debug = try std.fmt.allocPrint(allocator, "FN:{d:.1}s", .{false_negative_sec});
         }
 
-        ref_segment.debug_info = try std.fmt.allocPrint(eval.allocator, "{s}", .{fn_debug});
+        ref_segment.debug_info = try std.fmt.allocPrint(allocator, "{s}", .{fn_debug});
 
         if (ref_segment.duration() < config.ignore_shorter_than_sec) {
-            ref_segment.debug_info = try std.fmt.allocPrint(eval.allocator, "short,{d:.1}s", .{ref_segment.duration()});
+            ref_segment.debug_info = try std.fmt.allocPrint(allocator, "short,{d:.1}s", .{ref_segment.duration()});
             continue;
         }
 
@@ -267,6 +272,12 @@ pub fn calcFalseNegativeSec(
     return @max(0.0, ref_segment.duration() - overlap);
 }
 
+/// With `extrude_start = 1`, `extrude_end=2`, `fill_gaps=3`,
+/// ```
+///       index:    0 1 2 3 4 5 6 7 8 9
+///  Transforms:        |---|   |-|
+///          to:      |---------|-----|
+/// ```
 pub fn extrudeSegments(
     allocator: Allocator,
     segments: []const *SpeechSegment,

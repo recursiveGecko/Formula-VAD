@@ -2,10 +2,13 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const Simulation = @import("../simulator.zig").Simulation;
+const Evaluator = @import("../Evaluator.zig");
 const statistics = @import("../Evaluator/statistics.zig");
 const SingleStats = statistics.SingleStats;
 const AggregateStats = statistics.AggregateStats;
 const StatConfig = statistics.StatConfig;
+
+pub const Format = enum { plain, json };
 
 pub const definitions =
     \\P   (Positives):                            Total duration of real speech segments (from reference labels)
@@ -28,9 +31,12 @@ pub const table_row_fmt = "| {s: >30} | {d: >4.0} | {d: >4.0} | {d: >6.0} | {d: 
 
 pub fn bufPrintSimulationReport(
     allocator: Allocator,
-    simulation: Simulation,
-    stat_config: StatConfig,
+    eval_results: []Evaluator.Result,
+    /// TODO
+    format: Format,
 ) ![]const u8 {
+    _ = format; // autofix
+
     var array_buf = ArrayList(u8).init(allocator);
     const writer = array_buf.writer();
 
@@ -43,23 +49,21 @@ pub fn bufPrintSimulationReport(
     try writer.print(table_header_fmt, table_header_vals);
     try writer.print(table_separator_fmt, table_separator_vals);
 
-    for (simulation.instances) |instance| {
-        if (instance.evaluator) |evaluator| {
-            const stats = try statistics.fromEvaluator(evaluator, stat_config);
-            try all_stats_list.append(stats);
+    for (eval_results) |result| {
+        const stats = result.stats;
+        try all_stats_list.append(stats);
 
-            try writer.print(table_row_fmt, .{
-                instance.name,
-                stats.total_positives_sec,
-                stats.true_positives_sec,
-                stats.false_positives_sec,
-                stats.false_negatives_sec,
-                stats.false_positives_count,
-                stats.false_negatives_count,
-                stats.false_discovery_rate * 100,
-                stats.false_negative_rate * 100,
-            });
-        }
+        try writer.print(table_row_fmt, .{
+            result.name orelse "<null>",
+            stats.total_positives_sec,
+            stats.true_positives_sec,
+            stats.false_positives_sec,
+            stats.false_negatives_sec,
+            stats.false_positives_count,
+            stats.false_negatives_count,
+            stats.false_discovery_rate * 100,
+            stats.false_negative_rate * 100,
+        });
     }
 
     const all_stats = try all_stats_list.toOwnedSlice();

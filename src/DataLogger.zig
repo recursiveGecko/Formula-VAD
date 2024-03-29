@@ -47,8 +47,8 @@ pub fn deinit(self: *DataLoggerDB) void {
     self.db.deinit();
 }
 
-pub fn connect(self: *const DataLoggerDB, stream_info: Conn.StreamInfoInit) !*Conn {
-    const conn = try Conn.init(self, stream_info);
+pub fn connect(self: *const DataLoggerDB) !*Conn {
+    const conn = try Conn.init(self);
     return conn;
 }
 
@@ -60,25 +60,47 @@ fn printError(zuck_conn: zuckdb.Conn) void {
     }
 }
 
-const VADData = struct {
+const LogVADData = struct {
     fft: *const BufferedFFT.FFTResult,
     output: *const BufferedStep.Result,
     silero_vad: f32,
+};
+
+pub const StreamInfo = struct {
+    allocator: ?std.mem.Allocator = null,
+    id: ?i32 = null,
+    name: []const u8,
+    sample_rate: usize,
+
+    pub fn deinit(self: *StreamInfo) void {
+        if (self.allocator) |alloc| {
+            alloc.free(self.name);
+        }
+    }
+};
+
+pub const RefSegment = struct {
+    id: ?i32 = null,
+    from_sample: u64,
+    to_sample: u64,
+};
+
+pub const VADData = struct {
+    sample_number: u64,
+    volume_rms: f32,
+    channel_vol_ratio: ?f32,
+    silero_vad: f32,
+    // TODO: FFT bands
 };
 
 pub const Conn = struct {
     allocator: std.mem.Allocator,
     conn: zuckdb.Conn,
     stream_info_id: ?i32 = null,
-    stream_info: ?StreamInfoInit = null,
+    stream_info: ?StreamInfo = null,
     vad_appender: zuckdb.Appender,
 
-    const StreamInfoInit = struct {
-        name: []const u8,
-        sample_rate: usize,
-    };
-
-    pub fn init(data_logger_db: *const DataLoggerDB, stream_info: StreamInfoInit) !*Conn {
+    pub fn init(data_logger_db: *const DataLoggerDB) !*Conn {
         const allocator = data_logger_db.allocator;
 
         var conn = try data_logger_db.db.conn();
@@ -95,7 +117,6 @@ pub const Conn = struct {
         self.vad_appender = try self.conn.appender(null, "vad_data");
         errdefer self.vad_appender.deinit();
 
-        try self.initStreamInfo(stream_info);
         return self;
     }
 
@@ -105,7 +126,8 @@ pub const Conn = struct {
         self.allocator.destroy(self);
     }
 
-    fn initStreamInfo(self: *Conn, stream_info: StreamInfoInit) !void {
+    pub fn initStreamInfo(self: *Conn, stream_info: StreamInfo) !void {
+        if (stream_info.id != null) return error.IdAlreadyPresent;
         if (self.stream_info_id != null) return error.StreamInfoAlreadyInitialized;
 
         errdefer printError(self.conn);
@@ -122,7 +144,7 @@ pub const Conn = struct {
         self.stream_info = stream_info;
     }
 
-    pub fn logVAD(self: *Conn, data: VADData) !void {
+    pub fn logVAD(self: *Conn, data: LogVADData) !void {
         if (self.stream_info_id == null) return error.MissingStreamInfoId;
 
         const appender = &self.vad_appender;
@@ -192,12 +214,120 @@ pub const Conn = struct {
         }
         try self.conn.commit();
     }
+
+    /// Returns up to `results.len` results with ID > `after_id`, as a subslice of the original slice.
+    pub fn findStreamInfo(
+        self: *Conn,
+        allocator: std.mem.Allocator,
+        results: []StreamInfo,
+        after_id: ?i32,
+    ) ![]StreamInfo {
+        errdefer printError(self.conn);
+        var rows = try self.conn.query(
+            "SELECT CAST(id AS INTEGER), name, CAST(sample_rate AS UINTEGER) FROM stream_info WHERE id > $1 ORDER BY id ASC LIMIT $2",
+            .{ after_id orelse -1, results.len },
+        );
+        defer rows.deinit();
+
+        var i: u32 = 0;
+        while (try rows.next()) |row| : (i += 1) {
+            const stream_info = &results[i];
+
+            stream_info.* = .{
+                .id = row.get(i32, 0),
+                .name = row.get([]const u8, 1),
+                .sample_rate = row.get(u32, 2),
+            };
+
+            stream_info.allocator = allocator;
+            stream_info.name = try allocator.dupe(u8, stream_info.name);
+        }
+
+        return results[0..i];
+    }
+
+    /// Returns up to `results.len` results with `id` > `after_sample` as a subslice of the original slice.
+    pub fn findRefSegments(
+        self: *Conn,
+        stream_info_id: i32,
+        results: []RefSegment,
+        after_id: ?i32,
+    ) ![]RefSegment {
+        const id_filter: i32 = after_id orelse -1;
+
+        errdefer printError(self.conn);
+        var rows = try self.conn.query(
+            "SELECT CAST(id AS INTEGER), CAST(from_sample AS UBIGINT), CAST(to_sample AS UBIGINT) FROM reference_segments WHERE stream_info_id = $1 AND id > $2 ORDER BY id ASC LIMIT $3",
+            .{
+                stream_info_id,
+                id_filter,
+                results.len,
+            },
+        );
+        defer rows.deinit();
+
+        var i: u32 = 0;
+        while (try rows.next()) |row| : (i += 1) {
+            const vad_data = &results[i];
+
+            vad_data.* = RefSegment{
+                .id = row.get(i32, 0),
+                .from_sample = row.get(u64, 1),
+                .to_sample = row.get(u64, 2),
+            };
+        }
+
+        return results[0..i];
+    }
+
+    /// Returns up to `results.len` results with `sample_number` > `after_sample` as a subslice of the original slice.
+    pub fn findVADData(
+        self: *Conn,
+        stream_info_id: i32,
+        results: []VADData,
+        after_sample: ?u64,
+    ) ![]VADData {
+        const sample_num_filter: i64 = if (after_sample) |x| @intCast(x) else -1;
+
+        errdefer printError(self.conn);
+        var rows = try self.conn.query(
+            "SELECT CAST(sample_number AS UBIGINT), volume_rms, channel_vol_ratio, silero_vad FROM vad_data WHERE stream_info_id = $1 AND sample_number > $2 ORDER BY sample_number ASC LIMIT $3",
+            .{
+                stream_info_id,
+                sample_num_filter,
+                results.len,
+            },
+        );
+        defer rows.deinit();
+
+        var i: u32 = 0;
+        while (try rows.next()) |row| : (i += 1) {
+            const vad_data = &results[i];
+
+            vad_data.* = VADData{
+                .sample_number = row.get(u64, 0),
+                .volume_rms = row.get(f32, 1),
+                .channel_vol_ratio = row.get(?f32, 2),
+                .silero_vad = row.get(f32, 3),
+            };
+        }
+
+        return results[0..i];
+    }
 };
 
 const schema =
+    \\CREATE SEQUENCE IF NOT EXISTS 'stream_info_id_seq';
+    \\CREATE TABLE IF NOT EXISTS stream_info (
+    \\  id INTEGER PRIMARY KEY DEFAULT nextval('stream_info_id_seq'),
+    \\  name VARCHAR NOT NULL,
+    \\  sample_rate INTEGER NOT NULL
+    \\);
+    \\
+    \\
     \\CREATE TABLE IF NOT EXISTS vad_data (
     \\  stream_info_id INTEGER NOT NULL,
-    \\  sample_number INTEGER NOT NULL,
+    \\  sample_number UBIGINT NOT NULL,
     \\  volume_rms FLOAT4 NOT NULL,
     \\  channel_vol_ratio FLOAT4,
     \\  silero_vad FLOAT4 NOT NULL,
@@ -207,19 +337,12 @@ const schema =
     \\  fft_band_700_900 FLOAT4 NOT NULL
     \\);
     \\
-    \\CREATE SEQUENCE IF NOT EXISTS 'stream_info_id_seq';
-    \\CREATE TABLE IF NOT EXISTS stream_info (
-    \\  id INTEGER PRIMARY KEY DEFAULT nextval('stream_info_id_seq'),
-    \\  name VARCHAR NOT NULL,
-    \\  sample_rate INTEGER NOT NULL
-    \\);
-    \\
     \\CREATE SEQUENCE IF NOT EXISTS 'reference_segments_id_seq';
     \\CREATE TABLE IF NOT EXISTS reference_segments (
     \\  id INTEGER PRIMARY KEY DEFAULT nextval('reference_segments_id_seq'),
     \\  stream_info_id INTEGER NOT NULL,
-    \\  from_sample INTEGER NOT NULL,
-    \\  to_sample INTEGER NOT NULL
+    \\  from_sample UBIGINT NOT NULL,
+    \\  to_sample UBIGINT NOT NULL
     \\);
     \\
     \\CREATE SEQUENCE IF NOT EXISTS 'detected_segments_id_seq';

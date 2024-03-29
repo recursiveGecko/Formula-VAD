@@ -94,7 +94,7 @@ pub fn build(b: *Build) !void {
     eval_run_step.dependOn(&eval_run_artifact.step);
 
     //
-    // vad-simulator executable  - Runs VAD against given audio file and evaluates the results against a reference file
+    // simulator executable  - Runs VAD against given audio file and evaluates the results against a reference file
     //
     const sim_exe = b.addExecutable(.{
         .name = "simulator",
@@ -119,6 +119,31 @@ pub fn build(b: *Build) !void {
     }
     const sim_run_step = b.step("simulator", "Run the simulator (audio file + reference output)");
     sim_run_step.dependOn(&sim_run_artifact.step);
+
+    //
+    // dbsim executable  - Runs VAD against pre-cached data from DuckDB
+    //
+    const dbsim_exe = b.addExecutable(.{
+        .name = "dbsim",
+        .root_source_file = .{ .path = "src/simulator-db.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    try addClap(dbsim_exe, common_options);
+    try addOnnx(dbsim_exe, common_options);
+    try addDeepFilterNet(dbsim_exe, common_options);
+    try addDuckDb(dbsim_exe, common_options);
+
+    const dbsim_exe_install = b.addInstallArtifact(dbsim_exe, .{});
+    b.getInstallStep().dependOn(&dbsim_exe_install.step);
+
+    const dbsim_run_artifact = b.addRunArtifact(dbsim_exe);
+    dbsim_run_artifact.step.dependOn(&dbsim_exe_install.step);
+    if (b.args) |args| {
+        dbsim_run_artifact.addArgs(args);
+    }
+    const dbsim_run_step = b.step("dbsim", "Run the simulator (DuckDB input)");
+    dbsim_run_step.dependOn(&dbsim_run_artifact.step);
 }
 
 fn setRPath(exe: *Build.Step.Compile) !void {
