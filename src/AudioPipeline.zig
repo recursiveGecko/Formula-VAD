@@ -30,22 +30,24 @@ pub const Callbacks = struct {
 };
 
 pub const Config = struct {
-    pub const VADConfig = struct {
+    pub const PreVADConfig = struct {
         fft_size: usize = 1024,
         // TODO: used to be 20
         attenuation: f32 = 30,
         vad_machine_config: VADMachine.Config = .{},
         denoiser_model_path: [:0]const u8 = "data/DeepFilterNet3_onnx.tar.gz",
     };
+    pub const VADConfig = SileroVADMachine.Config;
 
     pub const RecordingTarget = enum { all, original, none };
 
-    sample_rate: usize,
-    n_channels: usize,
-    vad_config: VADConfig = .{},
     /// Caller continues to own the DataLogger connection and must close it when done
     data_logger: ?*DataLogger.Conn = null,
     record: RecordingTarget,
+    sample_rate: usize,
+    n_channels: usize,
+    pre_vad_config: PreVADConfig,
+    vad_config: VADConfig,
 };
 
 pub const SpeechSegment = struct {
@@ -131,8 +133,8 @@ pub fn init(
     self.b_denoiser = try BufferedDFNDenoiser.init(
         allocator,
         "denoiser",
-        config.vad_config.attenuation,
-        config.vad_config.denoiser_model_path,
+        config.pre_vad_config.attenuation,
+        config.pre_vad_config.denoiser_model_path,
         self.b_mixer.step.audio_config.out_sample_rate,
         true,
     );
@@ -160,8 +162,8 @@ pub fn init(
         allocator,
         "fft",
         .{
-            .fft_size = config.vad_config.fft_size,
-            .hop_size = config.vad_config.fft_size,
+            .fft_size = config.pre_vad_config.fft_size,
+            .hop_size = config.pre_vad_config.fft_size,
             .sample_rate = self.b_silero_vad.step.audio_config.out_sample_rate,
         },
         self,
@@ -169,7 +171,12 @@ pub fn init(
     errdefer self.b_fft.deinit();
 
     // self.vad_machine = try VADMachine.init(allocator, config.vad_config.vad_machine_config, self.config);
-    self.vad_machine = try SileroVADMachine.init(allocator, self.b_fft.step);
+    self.vad_machine = try SileroVADMachine.init(
+        allocator,
+        config.vad_config,
+        self.b_fft.step.rootSampleRateMultiplier(),
+        self.b_fft.step.audio_config.out_sample_rate,
+    );
 
     // Wire the steps
     self.b_first_step = self.b_original_recorder.step;

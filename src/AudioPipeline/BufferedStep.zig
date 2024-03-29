@@ -294,22 +294,32 @@ const IndexRange = struct {
 /// Converts sample index number at the current step to root sample index
 pub fn convertSampleIndexToRoot(self: *const Self, index: u64) IndexRange {
     const sr_mul = self.rootSampleRateMultiplier();
+    return convertSampleIndexToRoot2(sr_mul, index);
+}
+
+/// Converts sample index number at the current step to root sample index
+pub fn convertSampleIndexToRoot2(root_sr_mul: f64, index: u64) IndexRange {
     const index_f: f64 = @floatFromInt(index);
 
     return IndexRange{
-        .from = @intFromFloat(index_f / sr_mul),
-        .to = @intFromFloat((index_f + 1) / sr_mul),
+        .from = @intFromFloat(index_f / root_sr_mul),
+        .to = @intFromFloat((index_f + 1) / root_sr_mul),
     };
 }
 
 /// Converts sample index number at root to sample index at current step
 pub fn convertSampleIndexFromRoot(self: *const Self, index: u64) IndexRange {
     const sr_mul = self.rootSampleRateMultiplier();
+    return convertSampleIndexToRoot2(sr_mul, index);
+}
+
+/// Converts sample index number at root to sample index at current step
+pub fn convertSampleIndexFromRoot2(root_sr_mul: f64, index: u64) IndexRange {
     const index_f: f64 = @floatFromInt(index);
 
     return IndexRange{
-        .from = @intFromFloat(index_f * sr_mul),
-        .to = @intFromFloat((index_f + 1) * sr_mul),
+        .from = @intFromFloat(index_f * root_sr_mul),
+        .to = @intFromFloat((index_f + 1) * root_sr_mul),
     };
 }
 

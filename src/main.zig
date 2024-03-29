@@ -135,9 +135,10 @@ pub fn main() !void {
     const pipeline_config = AudioPipeline.Config{
         .sample_rate = 48000,
         .n_channels = 2,
-        .vad_config = AudioPipeline.Config.VADConfig{
+        .pre_vad_config = AudioPipeline.Config.PreVADConfig{
             .denoiser_model_path = denoiser_model_path,
         },
+        .vad_config = .{},
         // Only notify the parent process of original recordings,
         // or find a way to notify it about both original and denoised recordings
         // in a single message

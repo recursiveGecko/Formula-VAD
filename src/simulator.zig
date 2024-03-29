@@ -34,6 +34,7 @@ const StaticSimConfig = struct {
 pub const static_sim_config = StaticSimConfig{};
 
 pub const DynamicSimConfig = struct {
+    pre_vad_config: AudioPipeline.Config.PreVADConfig = .{},
     vad_config: AudioPipeline.Config.VADConfig = .{},
     output_dir: ?[]const u8 = null,
 };
@@ -131,7 +132,7 @@ pub fn main() !void {
     try runAll(arena_alloc, simulation);
 
     const stat_config = Evaluator.statistics.StatConfig{
-        .ignore_shorter_than_sec = simulation.config.vad_config.vad_machine_config.min_vad_duration_sec,
+        .ignore_shorter_than_sec = simulation.config.vad_config.min_speech_duration_ms / 1000,
         .extrude_start = 5,
         .extrude_end = 10,
         .fill_gaps = 5,

@@ -163,6 +163,7 @@ fn simulateVAD(self: *Self) ![]AudioPipeline.SpeechSegment {
             .sample_rate = stream.sample_rate,
             .n_channels = stream.n_channels,
             .vad_config = self.opts.sim_config.vad_config,
+            .pre_vad_config = self.opts.sim_config.pre_vad_config,
             .record = self.opts.cli_args.record,
             .data_logger = self.data_logger_conn,
         },

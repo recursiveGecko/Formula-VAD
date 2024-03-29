@@ -70,7 +70,7 @@ vad_segments: std.ArrayList(AudioPipeline.SpeechSegment),
 pub fn init(allocator: Allocator, config: Config, pipeline_config: AudioPipeline.Config) !Self {
     const sample_rate = pipeline_config.sample_rate;
     const sample_rate_f: f32 = @floatFromInt(sample_rate);
-    const fft_size = pipeline_config.vad_config.fft_size;
+    const fft_size = pipeline_config.pre_vad_config.fft_size;
     const fft_size_f: f32 = @floatFromInt(fft_size);
 
     const eval_per_sec = sample_rate_f / fft_size_f;
