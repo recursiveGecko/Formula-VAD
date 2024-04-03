@@ -310,7 +310,7 @@ pub fn convertSampleIndexToRoot2(root_sr_mul: f64, index: u64) IndexRange {
 /// Converts sample index number at root to sample index at current step
 pub fn convertSampleIndexFromRoot(self: *const Self, index: u64) IndexRange {
     const sr_mul = self.rootSampleRateMultiplier();
-    return convertSampleIndexToRoot2(sr_mul, index);
+    return convertSampleIndexFromRoot2(sr_mul, index);
 }
 
 /// Converts sample index number at root to sample index at current step
