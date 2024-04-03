@@ -32,6 +32,7 @@ pub const std_options: std.Options = .{
 
 pub const SimulationConfigJSON = struct {
     vad_config: AudioPipeline.Config.VADConfig = .{},
+    output_dir: []const u8,
 };
 
 pub const DBSimulationInstance = struct {
@@ -42,7 +43,7 @@ pub const DBSimulationInstance = struct {
 
 pub const Simulation = struct {
     instances: []DBSimulationInstance,
-    config: SimulationConfigJSON = .{},
+    config: SimulationConfigJSON,
 };
 
 pub const CLIArgs = struct {
@@ -104,14 +105,14 @@ pub fn main() !void {
     };
 
     // Initialize and run the simulation
-    var db = try DataLogger.open(gpa.allocator(), cli_args.database_path);
+    var db = try DataLogger.open(gpa.allocator(), cli_args.database_path, .{ .read_only = true });
     defer db.deinit();
 
     var conn = try db.connect();
     defer conn.deinit();
 
     var sim = try initialize(arena_alloc, conn, cli_args);
-    try stderr_w.print("Using config: {any}", .{sim.config});
+    try stderr_w.print("Using config: {any}\n", .{sim.config});
 
     var eval_results = try arena_alloc.alloc(Evaluator.Result, sim.instances.len);
     for (sim.instances, 0..) |*instance, i| {
@@ -208,9 +209,6 @@ fn runInstance(
     sim: *Simulation,
     instance: *DBSimulationInstance,
 ) !Evaluator.Result {
-    conn.conn.begin() catch unreachable;
-    defer conn.conn.rollback() catch unreachable;
-
     var silero_vad_machine = try SileroVADMachine.init(
         arena_alloc,
         sim.config.vad_config,
@@ -222,7 +220,7 @@ fn runInstance(
     var frame_length: ?u64 = null;
 
     var last_sample: ?u64 = null;
-    var vad_data_temp: [1_000_000]DataLogger.VADData = undefined;
+    var vad_data_temp: [100_000]DataLogger.VADData = undefined;
 
     while (true) {
         // Read VAD data
@@ -234,7 +232,12 @@ fn runInstance(
 
         // Run Silero VAD Machine
         for (vad_data) |sample| {
-            _ = try silero_vad_machine.run2(sample.sample_number, frame_length.?, sample.silero_vad);
+            const metrics = SileroVADMachine.FrameMetrics{
+                .first_sample_index = sample.sample_number,
+                .length = frame_length.?,
+                .vad = sample.silero_vad,
+            };
+            _ = try silero_vad_machine.run2(metrics);
         }
     }
 

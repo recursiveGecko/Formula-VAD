@@ -128,9 +128,8 @@ pub fn calculate(
 
         if (false_negative_sec > 0.01) {
             fn_debug = try std.fmt.allocPrint(allocator, "FN:{d:.1}s", .{false_negative_sec});
+            ref_segment.debug_info = try std.fmt.allocPrint(allocator, "{s}", .{fn_debug});
         }
-
-        ref_segment.debug_info = try std.fmt.allocPrint(allocator, "{s}", .{fn_debug});
 
         if (ref_segment.duration() < config.ignore_shorter_than_sec) {
             ref_segment.debug_info = try std.fmt.allocPrint(allocator, "short,{d:.1}s", .{ref_segment.duration()});

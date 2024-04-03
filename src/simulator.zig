@@ -34,7 +34,7 @@ const StaticSimConfig = struct {
     stat_config: Evaluator.statistics.StatConfig = .{
         // Should be overriden during evaluation to match VAD machine config
         .ignore_shorter_than_sec = 999999,
-        .extrude_start = 3,
+        .extrude_start = 2,
         .extrude_end = 2,
         .fill_gaps = 3,
     },
@@ -191,7 +191,7 @@ pub fn initialize(arena_alloc: Allocator, gpa_alloc: Allocator, cli_args: CLIArg
         // Initialize data logger
         if (cli_args.data_logger_enabled) {
             const data_log_path = try fs.path.resolve(arena_alloc, &.{ out_dir, "data-log.duckdb" });
-            data_logger = try DataLogger.open(gpa_alloc, data_log_path);
+            data_logger = try DataLogger.open(gpa_alloc, data_log_path, .{});
             // data_logger = try DataLogger.open(gpa_alloc, ":memory:");
             try data_logger.?.createTables();
         }
@@ -264,7 +264,7 @@ pub fn maybeSaveOutput(arena_alloc: Allocator, simulation: *const Simulation) !b
 
         const audacity_filename = try std.fmt.allocPrint(arena_alloc, "{s}-audacity.txt", .{instance.name});
         const audacity_path = try fs.path.join(arena_alloc, &.{ out_dir, audacity_filename });
-        const audacity_txt = try Evaluator.formats.serializeResultToAudacity(arena_alloc, instance.eval_result.?);
+        const audacity_txt = try instance.eval_result.?.serializeToAudacity(arena_alloc);
 
         fs.Dir.writeFile(fs.cwd(), audacity_path, audacity_txt) catch |err| {
             log.err("Failed to write Audacity txt: {any}", .{err});

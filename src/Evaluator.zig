@@ -142,6 +142,10 @@ pub const Result = struct {
         self.allocator.free(self.input_segments);
         self.allocator.free(self.ref_segments);
     }
+
+    pub fn serializeToAudacity(self: *const Result, allocator: std.mem.Allocator) ![]const u8 {
+        return formats.serializeResultToAudacity(allocator, self.*);
+    }
 };
 
 pub fn evaluate(

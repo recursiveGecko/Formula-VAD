@@ -10,6 +10,10 @@ const duckdb = zuckdb.c;
 
 const DataLoggerDB = @This();
 
+pub const Options = struct {
+    read_only: bool = false,
+};
+
 allocator: std.mem.Allocator,
 db: zuckdb.DB,
 
@@ -18,6 +22,7 @@ db: zuckdb.DB,
 pub fn open(
     allocator: std.mem.Allocator,
     path: []const u8,
+    opts: Options,
 ) !DataLoggerDB {
     var maybe_err: ?[]u8 = null;
     errdefer {
@@ -26,7 +31,14 @@ pub fn open(
             allocator.free(err);
         }
     }
-    const db = try zuckdb.DB.initWithErr(allocator, path, .{}, &maybe_err);
+    const db = try zuckdb.DB.initWithErr(
+        allocator,
+        path,
+        .{
+            .access_mode = if (opts.read_only) .read_only else .read_write,
+        },
+        &maybe_err,
+    );
     errdefer db.deinit();
 
     return DataLoggerDB{
@@ -60,12 +72,6 @@ fn printError(zuck_conn: zuckdb.Conn) void {
     }
 }
 
-const LogVADData = struct {
-    fft: *const BufferedFFT.FFTResult,
-    output: *const BufferedStep.Result,
-    silero_vad: f32,
-};
-
 pub const StreamInfo = struct {
     allocator: ?std.mem.Allocator = null,
     id: ?i32 = null,
@@ -83,6 +89,12 @@ pub const RefSegment = struct {
     id: ?i32 = null,
     from_sample: u64,
     to_sample: u64,
+};
+
+const VADDataInput = struct {
+    fft: *const BufferedFFT.FFTResult,
+    output: *const BufferedStep.Result,
+    silero_vad: f32,
 };
 
 pub const VADData = struct {
@@ -144,7 +156,7 @@ pub const Conn = struct {
         self.stream_info = stream_info;
     }
 
-    pub fn logVAD(self: *Conn, data: LogVADData) !void {
+    pub fn logVAD(self: *Conn, data: VADDataInput) !void {
         if (self.stream_info_id == null) return error.MissingStreamInfoId;
 
         const appender = &self.vad_appender;
@@ -159,6 +171,7 @@ pub const Conn = struct {
         }
         try appender.append(self.stream_info_id.?);
         try appender.append(data.output.segment.index);
+        try appender.append(data.output.segment.length());
         try appender.append(data.output.metadata.volume_rms);
         try appender.append(data.output.metadata.volume_ratio);
         try appender.append(data.output.metadata.silero_vad);
@@ -328,6 +341,7 @@ const schema =
     \\CREATE TABLE IF NOT EXISTS vad_data (
     \\  stream_info_id INTEGER NOT NULL,
     \\  sample_number UBIGINT NOT NULL,
+    \\  length UINTEGER NOT NULL,
     \\  volume_rms FLOAT4 NOT NULL,
     \\  channel_vol_ratio FLOAT4,
     \\  silero_vad FLOAT4 NOT NULL,
@@ -353,39 +367,105 @@ const schema =
     \\  to_sample INTEGER NOT NULL
     \\);
     \\
-    \\-- vad_data with each frame labelled as `is_ref_speech` and `is_detected_speech`
-    \\CREATE OR REPLACE VIEW labelled_vad_data AS
-    \\  SELECT vd.*,
-    \\          rs.id IS NOT NULL AS is_ref_speech,
-    \\          ds.id IS NOT NULL AS is_detected_speech
-    \\  FROM vad_data vd
-    \\  LEFT JOIN reference_segments rs on (rs.stream_info_id = vd.stream_info_id AND (vd.sample_number BETWEEN rs.from_sample AND rs.to_sample))
-    \\  LEFT JOIN detected_segments ds on (ds.stream_info_id = vd.stream_info_id AND (vd.sample_number BETWEEN ds.from_sample AND ds.to_sample))
-    \\  ORDER BY vd.stream_info_id, vd.sample_number
+    \\
+    \\-- information about where each stream's speech begins and ends (first sample of first speech and last sample of last speech)
+    \\CREATE OR REPLACE VIEW ref_speech_limits AS
+    \\  SELECT stream_info_id, min(from_sample) AS from_sample, max(to_sample) AS to_sample
+    \\  FROM reference_segments
+    \\  GROUP BY stream_info_id
     \\;
     \\
-    \\-- creates a matrix that aggregates `vad_data` metrics for each combination of (is_detected, is_reference) labels
-    \\CREATE OR REPLACE VIEW vad_data_matrix AS (
-    \\  WITH speech_regions AS (
-    \\    SELECT stream_info_id, min(from_sample) AS from_sample, max(to_sample) AS to_sample
-    \\    FROM reference_segments
-    \\    GROUP BY stream_info_id
+    \\-- marks regions of VAD data as ambiguous due to inaccuracies in manual labelling (which are typically slightly wide than speech itself)
+    \\--   + region from 0.25s before labelled start to 1.00s after labelled start 
+    \\--   + region from 1.00s before labelled end   to 0.25s after labelled end
+    \\CREATE OR REPLACE VIEW ambiguous_regions AS (
+    \\  WITH ref_segments_joined AS (
+    \\    SELECT rs.*, si.sample_rate
+    \\    FROM reference_segments rs
+    \\    INNER JOIN stream_info si ON rs.stream_info_id = si.id
     \\  )
-    \\    SELECT si.id AS si_id, si.name,
-    \\            is_ref_speech, is_detected_speech,
-    \\            median(silero_vad) AS silero_vad,
-    \\            median(channel_vol_ratio) AS channel_vol_ratio,
-    \\            median(fft_band_100_300) AS fft_band_100_300,
-    \\            median(fft_band_300_500) AS fft_band_300_500,
-    \\            median(fft_band_500_700) AS fft_band_500_700,
-    \\            median(fft_band_700_900) AS fft_band_700_900,
-    \\    FROM labelled_vad_data vd
-    \\    INNER JOIN speech_regions sr on sr.stream_info_id = vd.stream_info_id
-    \\    INNER JOIN stream_info si on si.id = vd.stream_info_id
-    \\    WHERE vd.sample_number BETWEEN sr.from_sample and sr.to_sample
-    \\    GROUP BY si.id, si.name, is_ref_speech, is_detected_speech
-    \\    ORDER BY si.id ASC, is_ref_speech DESC, is_detected_speech DESC
+    \\  (
+    \\    SELECT stream_info_id,
+    \\           CAST(GREATEST(0, from_sample - 0.25 * sample_rate) AS INTEGER) AS from_sample,
+    \\           CAST((from_sample + 1 * sample_rate) AS INTEGER) AS to_sample,
+    \\           'start' AS side
+    \\    FROM ref_segments_joined rsj
+    \\  )
+    \\  UNION ALL
+    \\  (
+    \\    SELECT stream_info_id,
+    \\           CAST(GREATEST(0, to_sample - 1 * sample_rate) AS INTEGER) AS from_sample,
+    \\           CAST((to_sample + 0.25 * sample_rate) AS INTEGER) AS to_sample,
+    \\           'end' AS side
+    \\    FROM ref_segments_joined rsj
+    \\  )
     \\);
+    \\
+    \\-- vad_data with each frame labelled as `is_ref_speech` and `is_detected_speech`, 'is_ambiguous'
+    \\CREATE OR REPLACE VIEW labelled_vad_data AS
+    \\  SELECT DISTINCT vd.*,
+    \\          rs.id IS NOT NULL AS is_ref_speech,
+    \\          ds.id IS NOT NULL AS is_detected_speech,
+    \\          rsl.from_sample IS NOT NULL AS is_within_limits,
+    \\          ar.from_sample IS NOT NULL AS is_ambiguous
+    \\  FROM vad_data vd
+    \\  LEFT JOIN reference_segments rs ON (rs.stream_info_id = vd.stream_info_id AND (vd.sample_number BETWEEN rs.from_sample AND rs.to_sample))
+    \\  LEFT JOIN detected_segments ds ON (ds.stream_info_id = vd.stream_info_id AND (vd.sample_number BETWEEN ds.from_sample AND ds.to_sample))
+    \\  LEFT JOIN ref_speech_limits rsl ON (rsl.stream_info_id = vd.stream_info_id AND (vd.sample_number BETWEEN rsl.from_sample AND rsl.to_sample))
+    \\  LEFT JOIN ambiguous_regions ar ON (ar.stream_info_id = vd.stream_info_id AND (vd.sample_number BETWEEN ar.from_sample AND ar.to_sample))
+    \\;
+    \\
+    \\-- creates a matrix that aggregates `vad_data` metrics for each combination of (is_detected, is_reference, is_ambiguous) labels
+    \\-- it ignores data before first speech segment and after last speech segment (using `ref_speech_limits` view)
+    \\CREATE OR REPLACE VIEW vad_data_matrix AS (
+    \\  SELECT si.id AS si_id, si.name,
+    \\          is_ref_speech, is_detected_speech, is_ambiguous, is_within_limits,
+    \\          SUM(vd.length) AS length,
+    \\          SUM(vd.length) / ANY_VALUE(si.sample_rate) AS length_sec,
+    \\          MEDIAN(silero_vad) AS silero_vad,
+    \\          MEDIAN(volume_rms) AS volume_rms,
+    \\          MEDIAN(channel_vol_ratio) AS channel_vol_ratio,
+    \\          MEDIAN(fft_band_100_300) AS fft_band_100_300,
+    \\          MEDIAN(fft_band_300_500) AS fft_band_300_500,
+    \\          MEDIAN(fft_band_500_700) AS fft_band_500_700,
+    \\          MEDIAN(fft_band_700_900) AS fft_band_700_900,
+    \\  FROM labelled_vad_data vd
+    \\  INNER JOIN stream_info si on si.id = vd.stream_info_id
+    \\  GROUP BY si.id, si.name, is_ref_speech, is_detected_speech, is_ambiguous, is_within_limits
+    \\);
+    \\
+    \\CREATE OR REPLACE VIEW vad_data_aggregated AS (
+    \\  WITH vdm AS (select * from vad_data_matrix where is_within_limits and not is_ambiguous),
+    \\       vdm_pivot AS (
+    \\         PIVOT vdm
+    \\         ON is_ref_speech IN (true, false), is_detected_speech IN (true, false)
+    \\         USING SUM(length) as length,
+    \\               SUM(silero_vad / length) as silero_vad,
+    \\               SUM(volume_rms / length) AS volume_rms,
+    \\               SUM(channel_vol_ratio / length) AS channel_vol_ratio,
+    \\               SUM((fft_band_100_300 + fft_band_300_500) / 2 / length) as fft_bands
+    \\         GROUP BY si_id
+    \\       )
+    \\  SELECT si.id, si.name,
+    \\         true_true_silero_vad / ((false_true_silero_vad * false_true_length + false_false_silero_vad * false_false_length)/(false_true_length + false_false_length)) AS tp_silero_vad,
+    \\         false_true_silero_vad / false_false_silero_vad AS fp_silero_vad,
+    \\         true_false_silero_vad / ((false_true_silero_vad * false_true_length + false_false_silero_vad * false_false_length)/(false_true_length + false_false_length)) AS fn_silero_vad,
+    \\
+    \\         true_true_volume_rms / ((false_true_volume_rms * false_true_length + false_false_volume_rms * false_false_length)/(false_true_length + false_false_length)) AS tp_volume_rms,
+    \\         false_true_volume_rms / false_false_volume_rms AS fp_volume_rms,
+    \\         true_false_volume_rms / ((false_true_volume_rms * false_true_length + false_false_volume_rms * false_false_length)/(false_true_length + false_false_length)) AS fn_volume_rms,
+    \\
+    \\         true_true_channel_vol_ratio / ((false_true_channel_vol_ratio * false_true_length + false_false_channel_vol_ratio * false_false_length)/(false_true_length + false_false_length)) AS tp_channel_vol_ratio,
+    \\         false_true_channel_vol_ratio / false_false_channel_vol_ratio AS fp_channel_vol_ratio,
+    \\         true_false_channel_vol_ratio / ((false_true_channel_vol_ratio * false_true_length + false_false_channel_vol_ratio * false_false_length)/(false_true_length + false_false_length)) AS fn_channel_vol_ratio,
+    \\
+    \\         true_true_fft_bands / ((false_true_fft_bands * false_true_length + false_false_fft_bands * false_false_length)/(false_true_length + false_false_length)) AS tp_fft_bands,
+    \\         false_true_fft_bands / false_false_fft_bands AS fp_fft_bands,
+    \\         true_false_fft_bands / ((false_true_fft_bands * false_true_length + false_false_fft_bands * false_false_length)/(false_true_length + false_false_length)) AS fn_fft_bands,
+    \\  FROM vdm_pivot
+    \\  INNER JOIN stream_info si ON si.id = vdm_pivot.si_id
+    \\);
+    \\
     \\
     \\-- vad_data joined with detected segments
     \\CREATE OR REPLACE VIEW detected_segment_vad_data AS
@@ -431,7 +511,7 @@ const schema =
     \\  FULL OUTER JOIN reference_segments rs ON (ds.stream_info_id = rs.stream_info_id)
     \\;
     \\
-    \\-- detected segments that were incorrectly detected by VAD (no overlap with reference segments)
+    \\-- detected segments that were incorrectly detected by VAD (no overlap with any reference segment)
     \\CREATE OR REPLACE VIEW false_positives AS
     \\  SELECT si.id AS si_id,
     \\      os.det_from AS from,
@@ -446,7 +526,7 @@ const schema =
     \\  HAVING MAX(overlap) = 0
     \\;
     \\
-    \\-- reference segments that were completely missed by VAD (no overlap with detected segments)
+    \\-- reference segments that were completely missed by VAD (no overlap with any detected segments)
     \\CREATE OR REPLACE VIEW false_negatives AS
     \\  SELECT si.id AS si_id,
     \\      os.ref_from as from,
@@ -462,3 +542,25 @@ const schema =
     \\;
     \\
 ;
+
+// Alternative labelled_vad_data implementations (~5-10x slower)
+//
+// \\-- vad_data with each frame labelled as `is_ref_speech` and `is_detected_speech`, 'is_ambiguous'
+// \\CREATE OR REPLACE VIEW labelled_vad_data AS
+// \\  SELECT vd.*,
+// \\          EXISTS (SELECT 1 FROM reference_segments rs WHERE rs.stream_info_id = vd.stream_info_id AND vd.sample_number BETWEEN rs.from_sample AND rs.to_sample) AS is_ref_speech,
+// \\          EXISTS (SELECT 1 FROM detected_segments ds WHERE ds.stream_info_id = vd.stream_info_id AND vd.sample_number BETWEEN ds.from_sample AND ds.to_sample) AS is_detected_speech,
+// \\          EXISTS (SELECT 1 FROM ambiguous_regions ar WHERE ar.stream_info_id = vd.stream_info_id AND vd.sample_number BETWEEN ar.from_sample AND ar.to_sample) AS is_ambiguous,
+// \\          EXISTS (SELECT 1 FROM ref_speech_limits rsl WHERE rsl.stream_info_id = vd.stream_info_id AND vd.sample_number BETWEEN rsl.from_sample AND rsl.to_sample) AS is_within_limits
+// \\  FROM vad_data vd
+// \\;
+// \\
+// \\-- vad_data with each frame labelled as `is_ref_speech` and `is_detected_speech`, 'is_ambiguous'
+// \\CREATE OR REPLACE VIEW labelled_vad_data AS
+// \\  SELECT vd.*
+// \\  FROM vad_data vd,
+// \\       LATERAL (SELECT COUNT(*) > 0 AS is_ref_speech FROM reference_segments rs WHERE rs.stream_info_id = vd.stream_info_id AND vd.sample_number BETWEEN rs.from_sample AND rs.to_sample),
+// \\       LATERAL (SELECT COUNT(*) > 0 AS is_detected_speech FROM detected_segments ds WHERE ds.stream_info_id = vd.stream_info_id AND vd.sample_number BETWEEN ds.from_sample AND ds.to_sample),
+// \\       LATERAL (SELECT COUNT(*) > 0 AS is_ambiguous FROM ambiguous_regions ar WHERE ar.stream_info_id = vd.stream_info_id AND vd.sample_number BETWEEN ar.from_sample AND ar.to_sample),
+// \\       LATERAL (SELECT COUNT(*) > 0 AS is_within_limits FROM ref_speech_limits rsl WHERE rsl.stream_info_id = vd.stream_info_id AND vd.sample_number BETWEEN rsl.from_sample AND rsl.to_sample)
+// \\;

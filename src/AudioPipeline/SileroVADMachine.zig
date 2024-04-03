@@ -32,8 +32,14 @@ pub const Config = struct {
     off_threshold: f32 = 0.35,
     min_speech_duration_ms: f32 = 800,
     max_silence_between_speech_ms: f32 = 1500,
-    pad_start_ms: usize = 1500,
-    pad_end_ms: usize = 1500,
+    pad_start_ms: usize = 1000,
+    pad_end_ms: usize = 500,
+};
+
+pub const FrameMetrics = struct {
+    first_sample_index: u64,
+    length: u64,
+    vad: f32,
 };
 
 allocator: std.mem.Allocator,
@@ -82,19 +88,24 @@ pub fn run(
     const length = prev_result.segment.length();
     const silero_vad = prev_result.metadata.silero_vad.?;
 
-    return self.run2(first_sample_index, length, silero_vad);
+    return self.run2(FrameMetrics{
+        .first_sample_index = first_sample_index,
+        .length = length,
+        .vad = silero_vad,
+    });
 }
 
 pub fn run2(
     self: *SileroVADMachine,
-    first_sample_index: u64,
-    length: u64,
-    vad: f32,
+    metrics: FrameMetrics,
 ) !Result {
     const cfg = self.config;
 
-    const last_sample_index = first_sample_index + length - 1;
+    const first_sample_index = metrics.first_sample_index;
+    const last_sample_index = metrics.first_sample_index + metrics.length - 1;
     const in_sample_rate = self.sample_rate;
+
+    const vad = metrics.vad;
 
     // std.debug.print("{d:5.3}\n", .{vad});
 
