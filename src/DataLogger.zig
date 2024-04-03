@@ -353,6 +353,40 @@ const schema =
     \\  to_sample INTEGER NOT NULL
     \\);
     \\
+    \\-- vad_data with each frame labelled as `is_ref_speech` and `is_detected_speech`
+    \\CREATE OR REPLACE VIEW labelled_vad_data AS
+    \\  SELECT vd.*,
+    \\          rs.id IS NOT NULL AS is_ref_speech,
+    \\          ds.id IS NOT NULL AS is_detected_speech
+    \\  FROM vad_data vd
+    \\  LEFT JOIN reference_segments rs on (rs.stream_info_id = vd.stream_info_id AND (vd.sample_number BETWEEN rs.from_sample AND rs.to_sample))
+    \\  LEFT JOIN detected_segments ds on (ds.stream_info_id = vd.stream_info_id AND (vd.sample_number BETWEEN ds.from_sample AND ds.to_sample))
+    \\  ORDER BY vd.stream_info_id, vd.sample_number
+    \\;
+    \\
+    \\-- creates a matrix that aggregates `vad_data` metrics for each combination of (is_detected, is_reference) labels
+    \\CREATE OR REPLACE VIEW vad_data_matrix AS (
+    \\  WITH speech_regions AS (
+    \\    SELECT stream_info_id, min(from_sample) AS from_sample, max(to_sample) AS to_sample
+    \\    FROM reference_segments
+    \\    GROUP BY stream_info_id
+    \\  )
+    \\    SELECT si.id AS si_id, si.name,
+    \\            is_ref_speech, is_detected_speech,
+    \\            median(silero_vad) AS silero_vad,
+    \\            median(channel_vol_ratio) AS channel_vol_ratio,
+    \\            median(fft_band_100_300) AS fft_band_100_300,
+    \\            median(fft_band_300_500) AS fft_band_300_500,
+    \\            median(fft_band_500_700) AS fft_band_500_700,
+    \\            median(fft_band_700_900) AS fft_band_700_900,
+    \\    FROM labelled_vad_data vd
+    \\    INNER JOIN speech_regions sr on sr.stream_info_id = vd.stream_info_id
+    \\    INNER JOIN stream_info si on si.id = vd.stream_info_id
+    \\    WHERE vd.sample_number BETWEEN sr.from_sample and sr.to_sample
+    \\    GROUP BY si.id, si.name, is_ref_speech, is_detected_speech
+    \\    ORDER BY si.id ASC, is_ref_speech DESC, is_detected_speech DESC
+    \\);
+    \\
     \\-- vad_data joined with detected segments
     \\CREATE OR REPLACE VIEW detected_segment_vad_data AS
     \\  SELECT ds.id as ds_id, ds.from_sample, ds.to_sample, vd.*
@@ -427,11 +461,4 @@ const schema =
     \\  HAVING MAX(overlap) = 0
     \\;
     \\
-    \\CREATE OR REPLACE VIEW false_positive_stats AS
-    \\  SELECT f.si_id, f.from, f.to, median(silero_vad)*100 as silero_vad_median, median(volume_rms)*100 as silero_vad_median
-    \\  FROM false_positives f
-    \\  INNER JOIN vad_data vd ON vd.stream_info_id = f.si_id AND vd.sample_number BETWEEN f.from AND f.to
-    \\  GROUP BY (f.si_id, f.from, f.to)
-    \\  ORDER BY f.si_id, f.from
-    \\;
 ;
