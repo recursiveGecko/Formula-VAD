@@ -180,6 +180,7 @@ pub fn init(
 
     // Wire the steps
     self.b_first_step = self.b_original_recorder.step;
+
     try self.b_original_recorder.step.connectTo(self.b_mixer.step);
     try self.b_mixer.step.connectTo(self.b_denoiser.step);
     try self.b_denoiser.step.connectTo(self.b_denoiser_recorder.step);

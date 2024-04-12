@@ -33,7 +33,7 @@ pub const Config = struct {
     speech_max_freq: f32 = 2000,
     /// Time span for tracking long-term volume in speech band and initial value
     long_term_speech_avg_sec: f32 = 180,
-    initial_long_term_avg: ?f64 = 0.005,
+    initial_long_term_avg: ?f32 = 0.005,
     /// Time span for short-term trigger in speech band
     short_term_speech_avg_sec: f32 = 0.2,
     /// Primary trigger for speech when short term avg in denoised speech band is this
@@ -145,7 +145,7 @@ pub fn run(
     const short_term = self.short_term_speech_volume.push(vol_in_speech_band);
     const channel_vol_ratio = self.channel_vol_ratio.push(fft_result.vad_metadata.volume_ratio orelse 0);
 
-    const threshold_base = self.long_term_speech_volume.last_avg orelse config.initial_long_term_avg orelse short_term;
+    const threshold_base = self.long_term_speech_volume.current_avg orelse config.initial_long_term_avg orelse short_term;
     const threshold = threshold_base * config.speech_threshold_factor;
     const threshold_met = short_term > threshold and channel_vol_ratio > config.channel_vol_ratio_threshold;
 

@@ -102,7 +102,7 @@ pub const VADData = struct {
     volume_rms: f32,
     channel_vol_ratio: ?f32,
     silero_vad: f32,
-    // TODO: FFT bands
+    fft_band_100_300: f32,
 };
 
 pub const Conn = struct {
@@ -191,8 +191,8 @@ pub const Conn = struct {
         for (ref_segments) |segment| {
             errdefer printError(self.conn);
 
-            const from_sample = audio_utils.secondsToSampleNumber(segment.from_sec, self.stream_info.?.sample_rate);
-            const to_sample = audio_utils.secondsToSampleNumber(segment.to_sec, self.stream_info.?.sample_rate);
+            const from_sample = audio_utils.secondsToSamples(segment.from_sec, self.stream_info.?.sample_rate);
+            const to_sample = audio_utils.secondsToSamples(segment.to_sec, self.stream_info.?.sample_rate);
 
             _ = try self.conn.exec(
                 "INSERT INTO reference_segments (stream_info_id, from_sample, to_sample) VALUES (?, ?, ?)",
@@ -304,7 +304,15 @@ pub const Conn = struct {
 
         errdefer printError(self.conn);
         var rows = try self.conn.query(
-            "SELECT CAST(sample_number AS UBIGINT), volume_rms, channel_vol_ratio, silero_vad FROM vad_data WHERE stream_info_id = $1 AND sample_number > $2 ORDER BY sample_number ASC LIMIT $3",
+            \\SELECT CAST(sample_number AS UBIGINT), 
+            \\      volume_rms,
+            \\      channel_vol_ratio,
+            \\      silero_vad,
+            \\      fft_band_100_300
+            \\FROM vad_data
+            \\WHERE stream_info_id = $1 AND sample_number > $2
+            \\ORDER BY sample_number ASC LIMIT $3
+        ,
             .{
                 stream_info_id,
                 sample_num_filter,
@@ -322,6 +330,7 @@ pub const Conn = struct {
                 .volume_rms = row.get(f32, 1),
                 .channel_vol_ratio = row.get(?f32, 2),
                 .silero_vad = row.get(f32, 3),
+                .fft_band_100_300 = row.get(f32, 4),
             };
         }
 
@@ -386,16 +395,16 @@ const schema =
     \\  )
     \\  (
     \\    SELECT stream_info_id,
-    \\           CAST(GREATEST(0, from_sample - 0.25 * sample_rate) AS INTEGER) AS from_sample,
-    \\           CAST((from_sample + 1 * sample_rate) AS INTEGER) AS to_sample,
+    \\           CAST(GREATEST(0, from_sample - 0.1 * sample_rate) AS INTEGER) AS from_sample,
+    \\           CAST((from_sample + 0.4 * sample_rate) AS INTEGER) AS to_sample,
     \\           'start' AS side
     \\    FROM ref_segments_joined rsj
     \\  )
     \\  UNION ALL
     \\  (
     \\    SELECT stream_info_id,
-    \\           CAST(GREATEST(0, to_sample - 1 * sample_rate) AS INTEGER) AS from_sample,
-    \\           CAST((to_sample + 0.25 * sample_rate) AS INTEGER) AS to_sample,
+    \\           CAST(GREATEST(0, to_sample - 0.4 * sample_rate) AS INTEGER) AS from_sample,
+    \\           CAST((to_sample + 0.1 * sample_rate) AS INTEGER) AS to_sample,
     \\           'end' AS side
     \\    FROM ref_segments_joined rsj
     \\  )
@@ -435,33 +444,33 @@ const schema =
     \\);
     \\
     \\CREATE OR REPLACE VIEW vad_data_aggregated AS (
-    \\  WITH vdm AS (select * from vad_data_matrix where is_within_limits and not is_ambiguous),
+    \\  WITH vdm AS (SELECT * FROM vad_data_matrix WHERE is_within_limits AND NOT is_ambiguous),
     \\       vdm_pivot AS (
     \\         PIVOT vdm
     \\         ON is_ref_speech IN (true, false), is_detected_speech IN (true, false)
-    \\         USING SUM(length) as length,
+    \\         USING SUM(length) as length_sum,
     \\               SUM(silero_vad / length) as silero_vad,
     \\               SUM(volume_rms / length) AS volume_rms,
-    \\               SUM(channel_vol_ratio / length) AS channel_vol_ratio,
+    \\               MEDIAN(channel_vol_ratio / length) AS channel_vol_ratio,
     \\               SUM((fft_band_100_300 + fft_band_300_500) / 2 / length) as fft_bands
     \\         GROUP BY si_id
     \\       )
     \\  SELECT si.id, si.name,
-    \\         true_true_silero_vad / ((false_true_silero_vad * false_true_length + false_false_silero_vad * false_false_length)/(false_true_length + false_false_length)) AS tp_silero_vad,
+    \\         true_true_silero_vad / ((false_true_silero_vad * false_true_length_sum + false_false_silero_vad * false_false_length_sum)/(false_true_length_sum + false_false_length_sum)) AS tp_silero_vad,
     \\         false_true_silero_vad / false_false_silero_vad AS fp_silero_vad,
-    \\         true_false_silero_vad / ((false_true_silero_vad * false_true_length + false_false_silero_vad * false_false_length)/(false_true_length + false_false_length)) AS fn_silero_vad,
+    \\         true_false_silero_vad / ((false_true_silero_vad * false_true_length_sum + false_false_silero_vad * false_false_length_sum)/(false_true_length_sum + false_false_length_sum)) AS fn_silero_vad,
     \\
-    \\         true_true_volume_rms / ((false_true_volume_rms * false_true_length + false_false_volume_rms * false_false_length)/(false_true_length + false_false_length)) AS tp_volume_rms,
+    \\         true_true_volume_rms / ((false_true_volume_rms * false_true_length_sum + false_false_volume_rms * false_false_length_sum)/(false_true_length_sum + false_false_length_sum)) AS tp_volume_rms,
     \\         false_true_volume_rms / false_false_volume_rms AS fp_volume_rms,
-    \\         true_false_volume_rms / ((false_true_volume_rms * false_true_length + false_false_volume_rms * false_false_length)/(false_true_length + false_false_length)) AS fn_volume_rms,
+    \\         true_false_volume_rms / ((false_true_volume_rms * false_true_length_sum + false_false_volume_rms * false_false_length_sum)/(false_true_length_sum + false_false_length_sum)) AS fn_volume_rms,
     \\
-    \\         true_true_channel_vol_ratio / ((false_true_channel_vol_ratio * false_true_length + false_false_channel_vol_ratio * false_false_length)/(false_true_length + false_false_length)) AS tp_channel_vol_ratio,
-    \\         false_true_channel_vol_ratio / false_false_channel_vol_ratio AS fp_channel_vol_ratio,
-    \\         true_false_channel_vol_ratio / ((false_true_channel_vol_ratio * false_true_length + false_false_channel_vol_ratio * false_false_length)/(false_true_length + false_false_length)) AS fn_channel_vol_ratio,
+    \\         true_true_channel_vol_ratio AS tp_channel_vol_ratio,
+    \\         false_true_channel_vol_ratio AS fp_channel_vol_ratio,
+    \\         true_false_channel_vol_ratio AS fn_channel_vol_ratio,
     \\
-    \\         true_true_fft_bands / ((false_true_fft_bands * false_true_length + false_false_fft_bands * false_false_length)/(false_true_length + false_false_length)) AS tp_fft_bands,
+    \\         true_true_fft_bands / ((false_true_fft_bands * false_true_length_sum + false_false_fft_bands * false_false_length_sum)/(false_true_length_sum + false_false_length_sum)) AS tp_fft_bands,
     \\         false_true_fft_bands / false_false_fft_bands AS fp_fft_bands,
-    \\         true_false_fft_bands / ((false_true_fft_bands * false_true_length + false_false_fft_bands * false_false_length)/(false_true_length + false_false_length)) AS fn_fft_bands,
+    \\         true_false_fft_bands / ((false_true_fft_bands * false_true_length_sum + false_false_fft_bands * false_false_length_sum)/(false_true_length_sum + false_false_length_sum)) AS fn_fft_bands,
     \\  FROM vdm_pivot
     \\  INNER JOIN stream_info si ON si.id = vdm_pivot.si_id
     \\);
