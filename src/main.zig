@@ -21,7 +21,7 @@ pub const std_options: std.Options = .{
 };
 
 const log = std.log.scoped(.main);
-const exit = std.os.exit;
+const exit = std.process.exit;
 const stdin = std.io.getStdIn();
 const stderr = std.io.getStdErr();
 const stdout = std.io.getStdOut();

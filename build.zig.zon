@@ -11,8 +11,8 @@
     },
     .dependencies = .{
         .clap = .{
-            .url = "https://github.com/Hejsil/zig-clap/archive/0f2db7700b05356ebb1ccddbbf1797048925f072.tar.gz",
-            .hash = "12203896de6eedec14712f4f1eaac8b646939cfed213c56accf231a0abb05f9dbb77",
+            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.9.1.tar.gz",
+            .hash = "122062d301a203d003547b414237229b09a7980095061697349f8bef41be9c30266b",
         },
         .zig_onnxruntime = .{
             .url = "https://github.com/recursiveGecko/onnxruntime.zig/archive/70b3d64b63a4dc40077c09b0c80cf4751ad1a059.tar.gz",
