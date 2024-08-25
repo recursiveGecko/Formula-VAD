@@ -120,7 +120,11 @@ pub fn process(self: *Self, prev_result: *const BufferedStep.Result) *const Buff
         const right_vol = audio_utils.rmsVolume(right);
         const min_vol = @min(left_vol, right_vol);
         const max_vol = @max(left_vol, right_vol);
-        const instant_ratio = min_vol / max_vol;
+        var instant_ratio = min_vol / max_vol;
+
+        if (!std.math.isFinite(instant_ratio)) {
+            instant_ratio = 0;
+        }
 
         // long term volume ratio (used to pick the best channel)
         const left_avg = left_rolling_avg.push(left_vol);
