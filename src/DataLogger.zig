@@ -167,18 +167,21 @@ pub const Conn = struct {
         const band_4 = try data.fft.averageVolumeInBand(700, 900, false);
 
         errdefer {
-            std.debug.panic("logVAD appender error: {s}", .{appender.err() orelse "<null>"});
+            std.debug.panic("logVAD appender error: {s}", .{appender.err orelse "<null>"});
         }
-        try appender.append(self.stream_info_id.?);
-        try appender.append(data.output.segment.index);
-        try appender.append(data.output.segment.length());
-        try appender.append(data.output.metadata.volume_rms);
-        try appender.append(data.output.metadata.volume_ratio);
-        try appender.append(data.output.metadata.silero_vad);
-        try appender.append(band_1);
-        try appender.append(band_2);
-        try appender.append(band_3);
-        try appender.append(band_4);
+        try appender.appendRow(&.{
+            self.stream_info_id.?,
+            data.output.segment.index,
+            data.output.segment.length(),
+            data.output.metadata.volume_rms,
+            data.output.metadata.volume_ratio,
+            data.output.metadata.silero_vad,
+            band_1,
+            band_2,
+            band_3,
+            band_4,
+        });
+
         try appender.endRow();
     }
 

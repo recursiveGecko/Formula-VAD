@@ -67,7 +67,7 @@ pub fn ObjectPool(comptime T: type, comptime TCreateArg: type) type {
         }
 
         pub fn release(self: *Self, item: *T) void {
-            var node: *Node = @fieldParentPtr(Node, "data", item);
+            var node: *Node = @fieldParentPtr("data", item);
             node.next = self.head;
             self.head = node;
             self.to_be_released -= 1;

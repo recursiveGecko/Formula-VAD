@@ -1,4 +1,5 @@
 .idea
 zig-out
 zig-cache
+.zig-cache
 imgui.ini

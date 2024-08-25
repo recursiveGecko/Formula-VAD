@@ -23,9 +23,7 @@ pub fn build(b: *Build) !void {
 
     const main_exe = b.addExecutable(.{
         .name = "formula-vad",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -35,18 +33,28 @@ pub fn build(b: *Build) !void {
     try addOnnx(main_exe, common_options);
     try addDeepFilterNet(main_exe, common_options);
     try addDuckDb(main_exe, common_options);
+    try setRPath(main_exe);
 
+    // link build-wide install step with main_exe install
     const main_exe_install = b.addInstallArtifact(main_exe, .{});
     b.getInstallStep().dependOn(&main_exe_install.step);
 
+    // create a run step for exe and link it to install step
     const main_run_artifact = b.addRunArtifact(main_exe);
     main_run_artifact.step.dependOn(&main_exe_install.step);
 
+    // forward `zig build` args to `main_exe`
     if (b.args) |args| {
         main_run_artifact.addArgs(args);
     }
+
+    // expose run step as subcommand "run" to `zig build`
     const main_run_step = b.step("run", "Run the main program");
     main_run_step.dependOn(&main_run_artifact.step);
+
+    // expose exe install step as subcommand "main" to `zig build`
+    const main_install_step = b.step("main", "Build & install the main program");
+    main_install_step.dependOn(&main_exe_install.step);
 
     //
     // formula-vad tests
@@ -54,7 +62,7 @@ pub fn build(b: *Build) !void {
 
     const test_exe = b.addTest(.{
         .name = "formula-vad-test",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -76,11 +84,12 @@ pub fn build(b: *Build) !void {
     //
     const eval_exe = b.addExecutable(.{
         .name = "evaluator",
-        .root_source_file = .{ .path = "src/Evaluator.zig" },
+        .root_source_file = b.path("src/Evaluator.zig"),
         .target = target,
         .optimize = optimize,
     });
     try addClap(eval_exe, common_options);
+    try setRPath(eval_exe);
 
     const eval_exe_install = b.addInstallArtifact(eval_exe, .{});
     b.getInstallStep().dependOn(&eval_exe_install.step);
@@ -98,7 +107,7 @@ pub fn build(b: *Build) !void {
     //
     const sim_exe = b.addExecutable(.{
         .name = "simulator",
-        .root_source_file = .{ .path = "src/simulator.zig" },
+        .root_source_file = b.path("src/simulator.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -108,6 +117,7 @@ pub fn build(b: *Build) !void {
     try addOnnx(sim_exe, common_options);
     try addDeepFilterNet(sim_exe, common_options);
     try addDuckDb(sim_exe, common_options);
+    try setRPath(sim_exe);
 
     const sim_exe_install = b.addInstallArtifact(sim_exe, .{});
     b.getInstallStep().dependOn(&sim_exe_install.step);
@@ -125,7 +135,7 @@ pub fn build(b: *Build) !void {
     //
     const dbsim_exe = b.addExecutable(.{
         .name = "dbsim",
-        .root_source_file = .{ .path = "src/simulator-db.zig" },
+        .root_source_file = b.path("src/simulator-db.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -133,6 +143,7 @@ pub fn build(b: *Build) !void {
     try addOnnx(dbsim_exe, common_options);
     try addDeepFilterNet(dbsim_exe, common_options);
     try addDuckDb(dbsim_exe, common_options);
+    try setRPath(dbsim_exe);
 
     const dbsim_exe_install = b.addInstallArtifact(dbsim_exe, .{});
     b.getInstallStep().dependOn(&dbsim_exe_install.step);
@@ -147,8 +158,11 @@ pub fn build(b: *Build) !void {
 }
 
 fn setRPath(exe: *Build.Step.Compile) !void {
-    exe.root_module.addRPathSpecial("$ORIGIN/lib");
+    // Don't add compile-time absolute library paths to runtime search path
     exe.each_lib_rpath = false;
+
+    // Executables should look for libraries in a binary-relative ./lib directory
+    exe.root_module.addRPathSpecial("$ORIGIN/lib");
 }
 
 fn addSndfile(exe: *Build.Step.Compile, options: CommonOptions) !void {
@@ -178,14 +192,6 @@ fn addKissFFT(exe: *Build.Step.Compile, options: CommonOptions) !void {
     };
 
     if (kiss_fft_lib == null) {
-        const source_files = &.{
-            // "kfc.c",
-            "kiss_fft.c",
-            // "kiss_fftnd.c",
-            // "kiss_fftndr.c",
-            "kiss_fftr.c",
-        };
-
         const lib = options.build.addStaticLibrary(.{
             .name = "kissfft",
             .optimize = options.optimize,
@@ -194,8 +200,14 @@ fn addKissFFT(exe: *Build.Step.Compile, options: CommonOptions) !void {
 
         lib.linkLibC();
         lib.addCSourceFiles(.{
-            .root = kissfft_dep.path("."),
-            .files = source_files,
+            .root = kissfft_dep.path(""),
+            .files = &.{
+                // "kfc.c",
+                "kiss_fft.c",
+                // "kiss_fftnd.c",
+                // "kiss_fftndr.c",
+                "kiss_fftr.c",
+            },
             .flags = &.{"-Wall"},
         });
 
@@ -206,7 +218,7 @@ fn addKissFFT(exe: *Build.Step.Compile, options: CommonOptions) !void {
         kiss_fft_lib = lib;
     }
 
-    exe.addIncludePath(kissfft_dep.path("."));
+    exe.addIncludePath(kissfft_dep.path(""));
     exe.linkLibrary(kiss_fft_lib.?);
 }
 
@@ -218,7 +230,6 @@ fn addOnnx(exe: *Build.Step.Compile, options: CommonOptions) !void {
     });
 
     exe.root_module.addImport("onnxruntime", onnx_dep.module("zig-onnxruntime"));
-    try setRPath(exe);
 
     //
     // onnxruntime shared library
@@ -230,13 +241,14 @@ fn addOnnx(exe: *Build.Step.Compile, options: CommonOptions) !void {
     const src_path = onnx_dep.module("onnxruntime_lib").root_source_file.?.getPath(b);
     const dst_path = try std.fs.path.join(b.allocator, &.{ b.install_path, "bin", "lib" });
 
-    // const install_onnx_libs = options.build.addInstallDirectory(.{
+    // const install_onnx_libs = b.addInstallDirectory(.{
     //     .source_dir = .{ .path = src_path },
     //     .install_dir = .bin,
     //     .install_subdir = "lib",
     // });
     // install.step.dependOn(&install_onnx_libs.step);
 
+    // slightly less ugly hack
     const install_onnx_symlinks = copySharedObjectsWithSymlinks(b, src_path, dst_path);
     exe.step.dependOn(&install_onnx_symlinks.step);
 }
@@ -250,7 +262,7 @@ fn addDeepFilterNet(exe: *Build.Step.Compile, options: CommonOptions) !void {
 
     exe.addIncludePath(dfn_dep.path("include"));
 
-    // Linking unwind or libcpp breaks stack traces
+    // Statically linking with libdeepfilter requires `unwind` or `libcpp`, both of which break stack traces
     // exe.addObjectFile(.{ .path = ".../...../libdeepfilter.a" });
     // exe.linkLibCpp(); // either one works
     // exe.linkSystemLibrary("unwind");
@@ -258,7 +270,6 @@ fn addDeepFilterNet(exe: *Build.Step.Compile, options: CommonOptions) !void {
     exe.addLibraryPath(dfn_dep.path("lib"));
     exe.linkSystemLibrary("deepfilter");
     exe.linkLibC();
-    try setRPath(exe);
 
     // Copy libs to output directory
     const dst_path = try std.fs.path.join(b.allocator, &.{ b.install_path, "bin", "lib" });
@@ -272,11 +283,10 @@ fn addDeepFilterNet(exe: *Build.Step.Compile, options: CommonOptions) !void {
 
 fn addDuckDb(exe: *Build.Step.Compile, options: CommonOptions) !void {
     const b = options.build;
-    const duckdb_release = "v0.10.1";
-    const platform_dir = "linux-amd64";
 
-    const lib_root_for_platform = b.pathJoin(&.{ b.pathFromRoot("lib"), "libduckdb", platform_dir });
-    const dynlib_name = "libduckdb.so";
+    // Add DuckDB library
+    const duckdb_variant = "linux_x64";
+    const duckdb_dep = b.dependency("duckdb_" ++ duckdb_variant, .{});
 
     // Add zuckdb driver
     {
@@ -285,33 +295,23 @@ fn addDuckDb(exe: *Build.Step.Compile, options: CommonOptions) !void {
             .optimize = options.optimize,
         }).module("zuckdb");
 
-        zuckdb.addIncludePath(.{ .path = lib_root_for_platform });
+        zuckdb.addIncludePath(duckdb_dep.path(""));
 
-        exe.addLibraryPath(.{ .path = lib_root_for_platform });
+        exe.addLibraryPath(duckdb_dep.path(""));
         exe.linkSystemLibrary("duckdb");
 
         exe.root_module.addImport("zuckdb", zuckdb);
-        try setRPath(exe);
     }
 
     {
-        // downloads libduckdb to `lib/` directory
-        const update_lib = b.addSystemCommand(&.{
-            "bash",
-            b.pathFromRoot("lib/libduckdb/update.sh"),
-            duckdb_release,
-        });
-        update_lib.expectExitCode(0);
-        update_lib.has_side_effects = true;
-        // _ = cmd.captureStdOut(); // This combined with has_side_effects=true results in "attempt to use null value" with 0.12.0-dev.3397+43edd53c3
-        exe.step.dependOn(&update_lib.step);
-
         // Copy libs to output directory
-        const dynlib_path = b.pathJoin(&.{ lib_root_for_platform, dynlib_name });
-        const out_rel_path = b.pathJoin(&.{ "lib", dynlib_name });
-        const install_shared_lib = b.addInstallBinFile(.{ .path = dynlib_path }, out_rel_path);
-        install_shared_lib.step.dependOn(&update_lib.step);
-        exe.step.dependOn(&install_shared_lib.step);
+        const dst_path = try std.fs.path.join(b.allocator, &.{ b.install_path, "bin", "lib" });
+        const install_duckdb_libs = copySharedObjectsWithSymlinks(
+            b,
+            duckdb_dep.path("").getPath(b),
+            dst_path,
+        );
+        exe.step.dependOn(&install_duckdb_libs.step);
     }
 }
 

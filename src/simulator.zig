@@ -154,7 +154,10 @@ pub fn main() !void {
 
     // Save report
     const report_path = try std.fs.path.join(arena_alloc, &.{ simulation.resolved_out_path.?, "report.txt" });
-    try std.fs.Dir.writeFile(fs.cwd(), report_path, report);
+    try std.fs.Dir.writeFile(fs.cwd(), .{
+        .sub_path = report_path,
+        .data = report,
+    });
 }
 
 pub fn initialize(arena_alloc: Allocator, gpa_alloc: Allocator, cli_args: CLIArgs) !*Simulation {
@@ -186,7 +189,10 @@ pub fn initialize(arena_alloc: Allocator, gpa_alloc: Allocator, cli_args: CLIArg
     // Maybe copy the plan JSON to the output directory and initialize DataLogger
     if (resolved_out_path) |out_dir| {
         const json_copy_path = try fs.path.join(arena_alloc, &.{ out_dir, "plan.json" });
-        try fs.Dir.writeFile(fs.cwd(), json_copy_path, plan_contents);
+        try fs.Dir.writeFile(fs.cwd(), .{
+            .sub_path = json_copy_path,
+            .data = plan_contents,
+        });
 
         // Initialize data logger
         if (cli_args.data_logger_enabled) {
@@ -266,7 +272,10 @@ pub fn maybeSaveOutput(arena_alloc: Allocator, simulation: *const Simulation) !b
         const audacity_path = try fs.path.join(arena_alloc, &.{ out_dir, audacity_filename });
         const audacity_txt = try instance.eval_result.?.serializeToAudacity(arena_alloc);
 
-        fs.Dir.writeFile(fs.cwd(), audacity_path, audacity_txt) catch |err| {
+        fs.Dir.writeFile(fs.cwd(), .{
+            .sub_path = audacity_path,
+            .data = audacity_txt,
+        }) catch |err| {
             log.err("Failed to write Audacity txt: {any}", .{err});
             return false;
         };
