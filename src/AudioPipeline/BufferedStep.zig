@@ -167,15 +167,16 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
     const could_skip_buffer = !step_is_unbuffered and input_len == expected_buf_size.? and self.buffer_writer.?.writtenCount() == 0;
     const skip_buffering = step_is_unbuffered or could_skip_buffer;
 
-    var total_written: usize = 0;
+    // Number of samples consumed from `prev_result.segment`
+    var n_consumed_input: usize = 0;
     while (true) {
         if (!skip_buffering) {
             // Write samples to the buffer and combine associated metadata
-            const n_written = try self.buffer_writer.?.write(prev_result.segment, total_written);
+            const n_written = try self.buffer_writer.?.write(prev_result.segment, n_consumed_input);
             self.buffer_metadata.push(prev_result.metadata, n_written);
-            total_written += n_written;
+            n_consumed_input += n_written;
         } else {
-            total_written = input_len;
+            n_consumed_input = input_len;
         }
 
         if (skip_buffering or self.buffer_writer.?.isFull()) {
@@ -249,24 +250,25 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
 
             if (!step_is_unbuffered) {
                 // Reset our buffer, it's imperative that previous steps set the correct segment index
-                const next_sample_index = prev_result.segment.index + total_written;
+                const next_sample_index = prev_result.segment.index + n_consumed_input;
                 self.buffer_writer.?.reset(next_sample_index);
                 self.buffer_metadata = .{};
             }
         }
 
-        if (total_written == prev_result.segment.length()) {
+        if (n_consumed_input == prev_result.segment.length()) {
+            // we consumed the entire input
             break;
-        } else if (total_written > prev_result.segment.length()) {
+        } else if (n_consumed_input > prev_result.segment.length()) {
             @setCold(true);
             // This might indicate that another part of the program is trampling over the memory
             // referenced by prev_result.
             std.debug.panic(
                 "BufferedStep '{s}' wrote more samples ({d}) than the input ({d})",
-                .{ self.name, total_written, prev_result.segment.length() },
+                .{ self.name, n_consumed_input, prev_result.segment.length() },
             );
         } else {
-            // left empty, we haven't written our full input to the buffer yet
+            // left empty, we haven't consumed our full input yet
         }
     }
 }
