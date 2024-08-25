@@ -232,8 +232,8 @@ pub fn storeResult(
     for (vad_segments, 0..) |vad_segment, i| {
         speech_segments[i] = Evaluator.SpeechSegment{
             .side = .vad,
-            .from_sec = audio_utils.sampleNumberToSeconds(vad_segment.sample_from, sample_rate),
-            .to_sec = audio_utils.sampleNumberToSeconds(vad_segment.sample_to, sample_rate),
+            .from_sec = audio_utils.samplesToSeconds(vad_segment.sample_from, sample_rate),
+            .to_sec = audio_utils.samplesToSeconds(vad_segment.sample_to, sample_rate),
             .debug_info = null,
         };
     }
