@@ -48,13 +48,9 @@ pub fn build(b: *Build) !void {
         main_run_artifact.addArgs(args);
     }
 
-    // expose run step as subcommand "run" to `zig build`
-    const main_run_step = b.step("run", "Run the main program");
-    main_run_step.dependOn(&main_run_artifact.step);
-
     // expose exe install step as subcommand "main" to `zig build`
-    const main_install_step = b.step("main", "Build & install the main program");
-    main_install_step.dependOn(&main_exe_install.step);
+    const main_zig_build_step = b.step("main", "Build & install the main program");
+    main_zig_build_step.dependOn(&main_exe_install.step);
 
     //
     // formula-vad tests
@@ -94,16 +90,11 @@ pub fn build(b: *Build) !void {
     const eval_exe_install = b.addInstallArtifact(eval_exe, .{});
     b.getInstallStep().dependOn(&eval_exe_install.step);
 
-    const eval_run_artifact = b.addRunArtifact(eval_exe);
-    eval_run_artifact.step.dependOn(&eval_exe_install.step);
-    if (b.args) |args| {
-        eval_run_artifact.addArgs(args);
-    }
-    const eval_run_step = b.step("evaluator", "Run the evaluator (VAD output + reference output)");
-    eval_run_step.dependOn(&eval_run_artifact.step);
+    const eval_zig_build_step = b.step("evaluator", "Run the evaluator (VAD output + reference output)");
+    eval_zig_build_step.dependOn(&eval_exe_install.step);
 
     //
-    // simulator executable  - Runs VAD against given audio file and evaluates the results against a reference file
+    // simulator executable  - Runs VAD against given audio file(s) and evaluates the results against reference file(s)
     //
     const sim_exe = b.addExecutable(.{
         .name = "simulator",
@@ -122,13 +113,8 @@ pub fn build(b: *Build) !void {
     const sim_exe_install = b.addInstallArtifact(sim_exe, .{});
     b.getInstallStep().dependOn(&sim_exe_install.step);
 
-    const sim_run_artifact = b.addRunArtifact(sim_exe);
-    sim_run_artifact.step.dependOn(&sim_exe_install.step);
-    if (b.args) |args| {
-        sim_run_artifact.addArgs(args);
-    }
-    const sim_run_step = b.step("simulator", "Run the simulator (audio file + reference output)");
-    sim_run_step.dependOn(&sim_run_artifact.step);
+    const sim_zig_build_step = b.step("simulator", "Build and install the simulator");
+    sim_zig_build_step.dependOn(&sim_exe_install.step);
 
     //
     // dbsim executable  - Runs VAD against pre-cached data from DuckDB
@@ -148,13 +134,8 @@ pub fn build(b: *Build) !void {
     const dbsim_exe_install = b.addInstallArtifact(dbsim_exe, .{});
     b.getInstallStep().dependOn(&dbsim_exe_install.step);
 
-    const dbsim_run_artifact = b.addRunArtifact(dbsim_exe);
-    dbsim_run_artifact.step.dependOn(&dbsim_exe_install.step);
-    if (b.args) |args| {
-        dbsim_run_artifact.addArgs(args);
-    }
-    const dbsim_run_step = b.step("dbsim", "Run the simulator (DuckDB input)");
-    dbsim_run_step.dependOn(&dbsim_run_artifact.step);
+    const dbsim_zig_build_step = b.step("dbsim", "Build and install the DB simulator (DuckDB input)");
+    dbsim_zig_build_step.dependOn(&dbsim_exe_install.step);
 }
 
 fn setRPath(exe: *Build.Step.Compile) !void {
