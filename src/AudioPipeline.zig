@@ -42,7 +42,7 @@ pub const Config = struct {
     pub const RecordingTarget = enum { all, original, none };
 
     /// Caller continues to own the DataLogger connection and must close it when done
-    data_logger: ?*DataLogger.Conn = null,
+    vad_data_logger: ?*DataLogger.VADDataLogger = null,
     record: RecordingTarget,
     sample_rate: usize,
     n_channels: usize,
@@ -74,7 +74,7 @@ b_denoiser: *BufferedDFNDenoiser,
 b_denoiser_recorder: *BufferedRecorder,
 b_fft: *BufferedFFT,
 b_silero_vad: *BufferedSileroVAD,
-data_logger: ?*DataLogger.Conn,
+vad_data_logger: ?*DataLogger.VADDataLogger,
 // Speech state machine
 vad_machine: SileroVADMachine,
 
@@ -96,7 +96,7 @@ pub fn init(
         .config = config,
         .allocator = allocator,
         .callbacks = callbacks,
-        .data_logger = config.data_logger,
+        .vad_data_logger = config.vad_data_logger,
         .recording_coordinator = undefined,
         .b_first_step = undefined,
         .b_original_recorder = undefined,
@@ -251,7 +251,7 @@ fn handleFFTResult(
         .none => {},
     }
 
-    if (self.data_logger) |dl| {
+    if (self.vad_data_logger) |dl| {
         try dl.logVAD(.{
             .fft = fft_result,
             .output = buffered_step_output,

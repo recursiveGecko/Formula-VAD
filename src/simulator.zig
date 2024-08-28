@@ -52,11 +52,11 @@ pub const Simulation = struct {
     instances: []SimulationInstance,
     config: DynamicSimConfig = .{},
     resolved_out_path: ?[]const u8,
-    data_logger: ?DataLogger,
+    data_logger: ?*DataLogger,
 
     pub fn deinit(self: *@This()) void {
-        if (self.data_logger) |*dl| dl.deinit();
         for (self.instances) |*instance| instance.deinit();
+        if (self.data_logger) |dl| dl.deinit();
     }
 };
 
@@ -146,7 +146,6 @@ pub fn main() !void {
     }
 
     const report = try report_generator.bufPrintSimulationReport(arena_alloc, results, .plain);
-
     try stdout_w.writeAll(report);
 
     // Generate output and report
@@ -184,7 +183,7 @@ pub fn initialize(arena_alloc: Allocator, gpa_alloc: Allocator, cli_args: CLIArg
         }
     };
 
-    var data_logger: ?DataLogger = null;
+    var data_logger: ?*DataLogger = null;
 
     // Maybe copy the plan JSON to the output directory and initialize DataLogger
     if (resolved_out_path) |out_dir| {

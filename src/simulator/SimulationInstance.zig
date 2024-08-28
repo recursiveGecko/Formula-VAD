@@ -27,7 +27,7 @@ pub const Opts = struct {
     output_dir: ?[]const u8,
     sim_config: DynamicSimConfig,
     cli_args: simulator.CLIArgs,
-    data_logger: ?DataLogger,
+    data_logger: ?*DataLogger,
     stat_config: Evaluator.statistics.StatConfig,
 };
 
@@ -89,7 +89,7 @@ thread_gpa: std.heap.GeneralPurposeAllocator(.{
     .thread_safe = false,
 }),
 main_thread_allocator: Allocator,
-data_logger_conn: ?*DataLogger.Conn,
+vad_data_logger: ?*DataLogger.VADDataLogger,
 eval_result: ?Evaluator.Result = null,
 progress: f32 = 0,
 mutex: std.Thread.Mutex = .{},
@@ -106,21 +106,22 @@ pub fn init(
     const audio_stream = try AudioFileStream.open(arena_alloc, audio_path);
     const ref_segments = try Evaluator.readParseAudacitySegments(arena_alloc, ref_path, Evaluator.SpeechSegment.Side.ref);
 
-    var data_logger_conn: ?*DataLogger.Conn = null;
-    if (opts.data_logger) |*dl| {
-        data_logger_conn = try dl.connect();
-        try data_logger_conn.?.initStreamInfo(.{
+    var vad_data_logger: ?*DataLogger.VADDataLogger = null;
+    if (opts.data_logger) |dl| {
+        vad_data_logger = try dl.acquireVADDataLogger();
+
+        try vad_data_logger.?.initStreamInfo(.{
             .name = name,
             .sample_rate = audio_stream.sample_rate,
         });
-        try data_logger_conn.?.insertRefSegments(ref_segments);
+        try vad_data_logger.?.insertRefSegments(ref_segments);
     }
 
     return Self{
         .name = name,
         .audio_stream = audio_stream,
         .reference_segments = ref_segments,
-        .data_logger_conn = data_logger_conn,
+        .vad_data_logger = vad_data_logger,
         .opts = opts,
         .main_thread_allocator = arena_alloc,
         .thread_gpa = .{},
@@ -128,7 +129,7 @@ pub fn init(
 }
 
 pub fn deinit(self: *@This()) void {
-    if (self.data_logger_conn) |dl| dl.deinit();
+    if (self.vad_data_logger) |dl| dl.deinit();
     if (self.eval_result) |*er| er.deinit();
     self.audio_stream.close();
 }
@@ -170,7 +171,7 @@ fn simulateVAD(self: *Self) ![]AudioPipeline.SpeechSegment {
             .vad_config = self.opts.sim_config.vad_config,
             .pre_vad_config = self.opts.sim_config.pre_vad_config,
             .record = self.opts.cli_args.record,
-            .data_logger = self.data_logger_conn,
+            .vad_data_logger = self.vad_data_logger,
         },
         pipeline_ctx.toPipelineCallbacks(),
     );
@@ -214,7 +215,7 @@ fn simulateVAD(self: *Self) ![]AudioPipeline.SpeechSegment {
     const vad_segments = try pipeline.vad_machine.vad_segments.toOwnedSlice();
     errdefer instance_alloc.free(vad_segments);
 
-    if (self.data_logger_conn) |conn| {
+    if (self.vad_data_logger) |conn| {
         try conn.insertDetectedSegments(vad_segments);
     }
 

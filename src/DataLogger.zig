@@ -8,14 +8,16 @@ const Evaluator = @import("./Evaluator.zig");
 const audio_utils = @import("./audio_utils.zig");
 const duckdb = zuckdb.c;
 
-const DataLoggerDB = @This();
+const DataLogger = @This();
 
 pub const Options = struct {
     read_only: bool = false,
+    pool_size: usize = 50,
 };
 
 allocator: std.mem.Allocator,
 db: zuckdb.DB,
+pool: *zuckdb.Pool,
 
 /// Same database should only be opened once per process since `database_open` isn't thread-safe,
 /// especially when a new database is created (some thread complain about an empty/corrupt file).
@@ -23,7 +25,12 @@ pub fn open(
     allocator: std.mem.Allocator,
     path: []const u8,
     opts: Options,
-) !DataLoggerDB {
+) !*DataLogger {
+    var self = try allocator.create(@This());
+    errdefer allocator.destroy(self);
+
+    self.allocator = allocator;
+
     var maybe_err: ?[]u8 = null;
     errdefer {
         if (maybe_err) |err| {
@@ -31,7 +38,7 @@ pub fn open(
             allocator.free(err);
         }
     }
-    const db = try zuckdb.DB.initWithErr(
+    self.db = try zuckdb.DB.initWithErr(
         allocator,
         path,
         .{
@@ -39,32 +46,30 @@ pub fn open(
         },
         &maybe_err,
     );
-    errdefer db.deinit();
+    errdefer self.db.deinit();
 
-    return DataLoggerDB{
-        .allocator = allocator,
-        .db = db,
-    };
+    self.pool = try self.db.pool(.{ .size = opts.pool_size });
+    return self;
 }
 
-pub fn createTables(self: *DataLoggerDB) !void {
-    var conn = try self.db.conn();
-    defer conn.deinit();
+pub fn deinit(self: *DataLogger) void {
+    self.pool.deinit();
+    self.allocator.destroy(self);
+}
+
+pub fn createTables(self: *DataLogger) !void {
+    var conn = try self.pool.acquire();
+    defer conn.release();
 
     errdefer printError(conn);
     _ = try conn.exec(schema, .{});
 }
 
-pub fn deinit(self: *DataLoggerDB) void {
-    self.db.deinit();
+pub fn acquireVADDataLogger(self: *DataLogger) !*VADDataLogger {
+    return VADDataLogger.init(self);
 }
 
-pub fn connect(self: *const DataLoggerDB) !*Conn {
-    const conn = try Conn.init(self);
-    return conn;
-}
-
-fn printError(zuck_conn: zuckdb.Conn) void {
+fn printError(zuck_conn: *zuckdb.Conn) void {
     if (zuck_conn.err) |err| {
         log.err("DataLogger query error: {s}", .{err});
     } else {
@@ -105,25 +110,27 @@ pub const VADData = struct {
     fft_band_100_300: f32,
 };
 
-pub const Conn = struct {
+pub const VADDataLogger = struct {
     allocator: std.mem.Allocator,
-    conn: zuckdb.Conn,
+    conn: *zuckdb.Conn,
     stream_info_id: ?i32 = null,
     stream_info: ?StreamInfo = null,
     vad_appender: zuckdb.Appender,
+    data_logger_db: *DataLogger,
 
-    pub fn init(data_logger_db: *const DataLoggerDB) !*Conn {
+    pub fn init(data_logger_db: *DataLogger) !*VADDataLogger {
         const allocator = data_logger_db.allocator;
 
-        var conn = try data_logger_db.db.conn();
-        errdefer conn.deinit();
+        var conn = try data_logger_db.pool.acquire();
+        errdefer conn.release();
 
-        var self = try allocator.create(Conn);
+        var self = try allocator.create(VADDataLogger);
 
-        self.* = Conn{
+        self.* = VADDataLogger{
             .allocator = allocator,
             .conn = conn,
             .vad_appender = undefined,
+            .data_logger_db = data_logger_db,
         };
 
         self.vad_appender = try self.conn.appender(null, "vad_data");
@@ -132,13 +139,17 @@ pub const Conn = struct {
         return self;
     }
 
-    pub fn deinit(self: *Conn) void {
+    pub fn deinit(self: *VADDataLogger) void {
+        self.vad_appender.flush() catch |err| {
+            std.log.err("Failed to flush VADDataLogger appender: {any}", .{err});
+        };
+
         self.vad_appender.deinit();
-        self.conn.deinit();
+        self.conn.release();
         self.allocator.destroy(self);
     }
 
-    pub fn initStreamInfo(self: *Conn, stream_info: StreamInfo) !void {
+    pub fn initStreamInfo(self: *VADDataLogger, stream_info: StreamInfo) !void {
         if (stream_info.id != null) return error.IdAlreadyPresent;
         if (self.stream_info_id != null) return error.StreamInfoAlreadyInitialized;
 
@@ -156,36 +167,30 @@ pub const Conn = struct {
         self.stream_info = stream_info;
     }
 
-    pub fn logVAD(self: *Conn, data: VADDataInput) !void {
+    pub fn logVAD(self: *VADDataLogger, data: VADDataInput) !void {
         if (self.stream_info_id == null) return error.MissingStreamInfoId;
 
         const appender = &self.vad_appender;
 
-        const band_1 = try data.fft.averageVolumeInBand(100, 300, false);
-        const band_2 = try data.fft.averageVolumeInBand(300, 500, false);
-        const band_3 = try data.fft.averageVolumeInBand(500, 700, false);
-        const band_4 = try data.fft.averageVolumeInBand(700, 900, false);
-
         errdefer {
             std.debug.panic("logVAD appender error: {s}", .{appender.err orelse "<null>"});
         }
-        try appender.appendRow(&.{
+        const row = &.{
             self.stream_info_id.?,
             data.output.segment.index,
             data.output.segment.length(),
             data.output.metadata.volume_rms,
             data.output.metadata.volume_ratio,
             data.output.metadata.silero_vad,
-            band_1,
-            band_2,
-            band_3,
-            band_4,
-        });
-
-        try appender.endRow();
+            try data.fft.averageVolumeInBand(100, 300, false),
+            try data.fft.averageVolumeInBand(300, 500, false),
+            try data.fft.averageVolumeInBand(500, 700, false),
+            try data.fft.averageVolumeInBand(700, 900, false),
+        };
+        try appender.appendRow(row);
     }
 
-    pub fn insertRefSegments(self: *Conn, ref_segments: []const Evaluator.SpeechSegment) !void {
+    pub fn insertRefSegments(self: *VADDataLogger, ref_segments: []const Evaluator.SpeechSegment) !void {
         if (self.stream_info_id == null) return error.MissingStreamInfoId;
 
         try self.conn.begin();
@@ -210,7 +215,7 @@ pub const Conn = struct {
         try self.conn.commit();
     }
 
-    pub fn insertDetectedSegments(self: *Conn, ref_segments: []const AudioPipeline.SpeechSegment) !void {
+    pub fn insertDetectedSegments(self: *VADDataLogger, ref_segments: []const AudioPipeline.SpeechSegment) !void {
         if (self.stream_info_id == null) return error.MissingStreamInfoId;
 
         try self.conn.begin();
@@ -233,7 +238,7 @@ pub const Conn = struct {
 
     /// Returns up to `results.len` results with ID > `after_id`, as a subslice of the original slice.
     pub fn findStreamInfo(
-        self: *Conn,
+        self: *VADDataLogger,
         allocator: std.mem.Allocator,
         results: []StreamInfo,
         after_id: ?i32,
@@ -264,7 +269,7 @@ pub const Conn = struct {
 
     /// Returns up to `results.len` results with `id` > `after_sample` as a subslice of the original slice.
     pub fn findRefSegments(
-        self: *Conn,
+        self: *VADDataLogger,
         stream_info_id: i32,
         results: []RefSegment,
         after_id: ?i32,
@@ -298,7 +303,7 @@ pub const Conn = struct {
 
     /// Returns up to `results.len` results with `sample_number` > `after_sample` as a subslice of the original slice.
     pub fn findVADData(
-        self: *Conn,
+        self: *VADDataLogger,
         stream_info_id: i32,
         results: []VADData,
         after_sample: ?u64,

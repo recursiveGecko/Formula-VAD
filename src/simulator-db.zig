@@ -10,7 +10,6 @@ const audio_utils = @import("./audio_utils.zig");
 const DataLogger = @import("./DataLogger.zig");
 const report_generator = @import("./simulator/report_generator.zig");
 
-const Thread = std.Thread;
 const fs = std.fs;
 const log = std.log.scoped(.db_simulator);
 const exit = std.process.exit;
@@ -105,18 +104,18 @@ pub fn main() !void {
     };
 
     // Initialize and run the simulation
-    var db = try DataLogger.open(gpa.allocator(), cli_args.database_path, .{ .read_only = true });
-    defer db.deinit();
+    var data_logger = try DataLogger.open(gpa.allocator(), cli_args.database_path, .{ .read_only = true });
+    defer data_logger.deinit();
 
-    var conn = try db.connect();
-    defer conn.deinit();
+    const vad_logger = try data_logger.acquireVADDataLogger();
+    defer vad_logger.deinit();
 
-    var sim = try initialize(arena_alloc, conn, cli_args);
+    var sim = try initialize(arena_alloc, vad_logger, cli_args);
     try stderr_w.print("Using config: {any}\n", .{sim.config});
 
     var eval_results = try arena_alloc.alloc(Evaluator.Result, sim.instances.len);
     for (sim.instances, 0..) |*instance, i| {
-        eval_results[i] = try runInstance(arena_alloc, conn, &sim, instance);
+        eval_results[i] = try runInstance(arena_alloc, vad_logger, &sim, instance);
     }
 
     const report = try report_generator.bufPrintSimulationReport(arena_alloc, eval_results, .plain);
@@ -131,7 +130,7 @@ pub fn main() !void {
     // try std.fs.Dir.writeFile(fs.cwd(), report_path, report);
 }
 
-fn initialize(arena_alloc: std.mem.Allocator, conn: *DataLogger.Conn, cli_args: CLIArgs) !Simulation {
+fn initialize(arena_alloc: std.mem.Allocator, conn: *DataLogger.VADDataLogger, cli_args: CLIArgs) !Simulation {
     // Find all StreamInfos
     const all_stream_infos = val: {
         var list = std.ArrayList(DataLogger.StreamInfo).init(arena_alloc);
@@ -205,7 +204,7 @@ fn initialize(arena_alloc: std.mem.Allocator, conn: *DataLogger.Conn, cli_args: 
 
 fn runInstance(
     arena_alloc: std.mem.Allocator,
-    conn: *DataLogger.Conn,
+    conn: *DataLogger.VADDataLogger,
     sim: *Simulation,
     instance: *DBSimulationInstance,
 ) !Evaluator.Result {
@@ -236,6 +235,8 @@ fn runInstance(
                 .first_sample_index = sample.sample_number,
                 .length = frame_length.?,
                 .vad = sample.silero_vad,
+                .channel_vol_ratio = sample.channel_vol_ratio,
+                .speech_band_vol = sample.fft_band_100_300,
             };
             _ = try silero_vad_machine.run2(metrics);
         }
@@ -251,8 +252,8 @@ fn runInstance(
         for (vad_segments, 0..) |vad_segment, i| {
             speech_segments[i] = Evaluator.SpeechSegment{
                 .side = .vad,
-                .from_sec = audio_utils.sampleNumberToSeconds(vad_segment.sample_from, sample_rate),
-                .to_sec = audio_utils.sampleNumberToSeconds(vad_segment.sample_to, sample_rate),
+                .from_sec = audio_utils.samplesToSeconds(vad_segment.sample_from, sample_rate),
+                .to_sec = audio_utils.samplesToSeconds(vad_segment.sample_to, sample_rate),
                 .debug_info = null,
             };
         }
