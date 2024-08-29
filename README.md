@@ -62,7 +62,7 @@ Fowlkes-Mallows index     :    98.9%
 
 # Dependencies
 
-* Zig: `0.12.0 master`. Tested with `0.12.0-dev.3397+43edd53c3`.
+* Zig: `0.13.0`
 
 * libsndfile:
 
@@ -75,10 +75,10 @@ A JSON file containing the run plan needs to be created, an example can be found
 
 Any relative paths inside the JSON file are relative to the JSON file itself, not the current working directory.
 
-Suggested optimization modes are either `ReleaseSafe` or `ReleaseFast`.
+Suggested optimization mode: `ReleaseSafe`
 
 To run the simulator:
 
 ```bash
-zig build -Doptimize=ReleaseSafe && ./zig-out/bin/simulator -i tmp/plan.json
+zig build -Doptimize=ReleaseSafe && time ./zig-out/bin/simulator -i tmp/plan.json
 ```
