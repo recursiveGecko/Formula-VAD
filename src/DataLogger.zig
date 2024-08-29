@@ -175,7 +175,8 @@ pub const VADDataLogger = struct {
         errdefer {
             std.debug.panic("logVAD appender error: {s}", .{appender.err orelse "<null>"});
         }
-        const row = &.{
+
+        try appender.appendRow(.{
             self.stream_info_id.?,
             data.output.segment.index,
             data.output.segment.length(),
@@ -186,8 +187,7 @@ pub const VADDataLogger = struct {
             try data.fft.averageVolumeInBand(300, 500, false),
             try data.fft.averageVolumeInBand(500, 700, false),
             try data.fft.averageVolumeInBand(700, 900, false),
-        };
-        try appender.appendRow(row);
+        });
     }
 
     pub fn insertRefSegments(self: *VADDataLogger, ref_segments: []const Evaluator.SpeechSegment) !void {
