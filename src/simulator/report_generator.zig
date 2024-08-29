@@ -21,13 +21,13 @@ pub const definitions =
     \\FNR (False negative rate, miss rate):       Probability that VAD misses speech.        = FN / P 
 ;
 
-pub const table_header_fmt = "| {s: >30} | {s: >4} | {s: >4} | {s: >6} | {s: >6} | {s: >6} | {s: >6} | {s: >6} | {s: >6} |\n";
-pub const table_header_vals = .{ "Name", "P/s", "TP/s", "FP/s", "FN/s", "FP/#", "FN/#", "FDR/s", "FNR/s" };
+pub const table_header_fmt = "| {s: >30} | {s: >4} | {s: >4} | {s: >6} | {s: >6} | {s: >6} | {s: >6} | {s: >6} | {s: >6} | {s: >6} |\n";
+pub const table_header_vals = .{ "Name", "P/s", "TP/s", "FP/s", "FN/s", "TP/#", "FP/#", "FN/#", "FDR/s", "FNR/s" };
 
-pub const table_separator_fmt = "| {s:->30} | {s:->4} | {s:->4} | {s:->6} | {s:->6} | {s:->6} | {s:->6} | {s:->6} | {s:->6} |\n";
-pub const table_separator_vals = .{ "", "", "", "", "", "", "", "", "" };
+pub const table_separator_fmt = "| {s:->30} | {s:->4} | {s:->4} | {s:->6} | {s:->6} | {s:->6} | {s:->6} | {s:->6} | {s:->6} | {s:->6} |\n";
+pub const table_separator_vals = .{ "", "", "", "", "", "", "", "", "", "" };
 
-pub const table_row_fmt = "| {s: >30} | {d: >4.0} | {d: >4.0} | {d: >6.0} | {d: >6.0} | {d: >6.0} | {d: >6.0} | {d: >5.1}% | {d: >5.1}% |\n";
+pub const table_row_fmt = "| {s: <30} | {d: >4.0} | {d: >4.0} | {d: >6.0} | {d: >6.0} | {d: >6.0} | {d: >6.0} | {d: >6.0} | {d: >5.1}% | {d: >5.1}% |\n";
 
 pub fn bufPrintSimulationReport(
     allocator: Allocator,
@@ -59,6 +59,7 @@ pub fn bufPrintSimulationReport(
             stats.true_positives_sec,
             stats.false_positives_sec,
             stats.false_negatives_sec,
+            stats.true_positives_count,
             stats.false_positives_count,
             stats.false_negatives_count,
             stats.false_discovery_rate * 100,
@@ -76,6 +77,7 @@ pub fn bufPrintSimulationReport(
     try writer.print("True positives        (TP/s): {d: >7.1} sec\n", .{agg.true_positives_sec});
     try writer.print("False positives sec.  (FP/s): {d: >7.1} sec\n", .{agg.false_positives_sec});
     try writer.print("False negatives sec.  (FN/s): {d: >7.1} sec\n", .{agg.false_negatives_sec});
+    try writer.print("True positives        (TP/#): {d: >7.1} x\n", .{agg.true_positives_count});
     try writer.print("False positives #     (FP/#): {d: >7.1} x\n", .{agg.false_positives_count});
     try writer.print("False negatives #     (FN/#): {d: >7.1} x", .{agg.false_negatives_count});
     try writer.print("      Min.    Avg.    Max. \n", .{});

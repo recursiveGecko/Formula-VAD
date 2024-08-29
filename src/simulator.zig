@@ -34,9 +34,9 @@ const StaticSimConfig = struct {
     stat_config: Evaluator.statistics.StatConfig = .{
         // Should be overriden during evaluation to match VAD machine config
         .ignore_shorter_than_sec = 999999,
-        .extrude_start = 2,
-        .extrude_end = 2,
-        .fill_gaps = 3,
+        .fp_start_grace_sec = 2,
+        .fp_end_grace_sec = 2,
+        .fill_gaps_limit_sec = 3,
     },
 };
 pub const static_sim_config = StaticSimConfig{};

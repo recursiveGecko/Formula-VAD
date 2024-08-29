@@ -14,9 +14,11 @@ pub const SingleStats = struct {
     false_positives_sec: f32 = 0,
     /// FN(s) - Duration of missed speech segments
     false_negatives_sec: f32 = 0,
-    /// FP(#) - Number of missed speech segments (without overlap)
-    false_positives_count: u32 = 0,
+    /// TP(#) - Number of correctly detected speech segments
+    true_positives_count: u32 = 0,
     /// FN(#) - Number of falsely detected speech segments (without overlap)
+    false_positives_count: u32 = 0,
+    /// FP(#) - Number of missed speech segments (without overlap)
     false_negatives_count: u32 = 0,
     /// TPR (sensitivity, recall) = TP / P
     /// Probability that VAD detects a real speech segment
@@ -56,9 +58,11 @@ pub const AggregateStats = struct {
     false_positives_sec: f32 = 0,
     /// FN(s) - Duration of missed speech segments
     false_negatives_sec: f32 = 0,
-    /// FP(#) - Number of missed speech segments (without overlap)
-    false_positives_count: u32 = 0,
+    /// TP(#) - Number of correctly detected speech segments
+    true_positives_count: u32 = 0,
     /// FN(#) - Number of falsely detected speech segments (without overlap)
+    false_positives_count: u32 = 0,
+    /// FP(#) - Number of missed speech segments (without overlap)
     false_negatives_count: u32 = 0,
     /// TPR (sensitivity, recall) = TP / P
     /// Probability that VAD detects a speech segment
@@ -85,9 +89,12 @@ pub const AggregateStats = struct {
 pub const StatConfig = struct {
     // Ignores false negatives shorter than this value
     ignore_shorter_than_sec: f32 = 0.0,
-    extrude_start: f32 = 0,
-    extrude_end: f32 = 0,
-    fill_gaps: f32 = 0,
+    // when calculating false-positive match duration, extrude the starts of reference segments by this many seconds
+    fp_start_grace_sec: f32 = 0,
+    // when calculating false-positive match duration, extrude the ends of reference segments by this many seconds
+    fp_end_grace_sec: f32 = 0,
+    // when calculating false-positive match duration, fill gaps between reference segments that are s
+    fill_gaps_limit_sec: f32 = 0,
 };
 
 pub fn calculate(
@@ -111,6 +118,8 @@ pub fn calculate(
 
         if (segment.opposite_segments.?.len == 0) {
             stats.false_positives_count += 1;
+        } else {
+            stats.true_positives_count += 1;
         }
 
         segment.debug_info = try std.fmt.allocPrint(allocator, "{s}", .{fp_debug});
@@ -131,16 +140,18 @@ pub fn calculate(
             ref_segment.debug_info = try std.fmt.allocPrint(allocator, "{s}", .{fn_debug});
         }
 
+        // ignore short reference segments
         if (ref_segment.duration() < config.ignore_shorter_than_sec) {
             ref_segment.debug_info = try std.fmt.allocPrint(allocator, "short,{d:.1}s", .{ref_segment.duration()});
             continue;
         }
 
-        if (ref_segment.opposite_segments.?.len == 0) {
+        if (false_negative_sec > 0.5 or ref_segment.opposite_segments.?.len == 0) {
             stats.false_negatives_count += 1;
         }
 
         stats.false_negatives_sec += false_negative_sec;
+        // 'true positive' seconds are already counted in 'total positives', add 'false negative' seconds to the total
         stats.total_positives_sec += false_negative_sec;
     }
 
@@ -169,6 +180,7 @@ pub fn aggregate(stats: []SingleStats) AggregateStats {
         agg.true_positives_sec += s.true_positives_sec;
         agg.false_positives_sec += s.false_positives_sec;
         agg.false_negatives_sec += s.false_negatives_sec;
+        agg.true_positives_count += s.true_positives_count;
         agg.false_positives_count += s.false_positives_count;
         agg.false_negatives_count += s.false_negatives_count;
 
@@ -239,6 +251,7 @@ pub fn calcFalsePositiveSec(
     config: StatConfig,
 ) !f32 {
     if (vad_segment.side != .vad) return error.InvalidSegmentSide;
+    if (vad_segment.opposite_segments == null) return error.MissingOppositeSegments;
 
     const extruded_ref_matches = try extrudeSegments(alloc, vad_segment.opposite_segments.?, config);
     defer alloc.free(extruded_ref_matches);
@@ -291,14 +304,14 @@ pub fn extrudeSegments(
     var first = &cloned[0];
     var last = &cloned[cloned.len - 1];
 
-    first.from_sec -= config.extrude_start;
-    last.to_sec += config.extrude_end;
+    first.from_sec -= config.fp_start_grace_sec;
+    last.to_sec += config.fp_end_grace_sec;
 
     for (0..cloned.len - 1) |i| {
         var current = &cloned[i];
         const next = &cloned[i + 1];
 
-        if (next.from_sec - current.to_sec <= config.fill_gaps) {
+        if (next.from_sec - current.to_sec <= config.fill_gaps_limit_sec) {
             current.to_sec = next.from_sec;
         }
     }
@@ -363,9 +376,9 @@ test "calcFalsePositiveSec #1" {
     };
 
     const config = StatConfig{
-        .extrude_start = 2,
-        .extrude_end = 2,
-        .fill_gaps = 2,
+        .fp_start_grace_sec = 2,
+        .fp_end_grace_sec = 2,
+        .fill_gaps_limit_sec = 2,
     };
 
     const fp_sec = try calcFalsePositiveSec(std.testing.allocator, vad_segment, config);
@@ -401,9 +414,9 @@ test "calcFalsePositiveSec #2" {
     };
 
     const config = StatConfig{
-        .extrude_start = 2,
-        .extrude_end = 2,
-        .fill_gaps = 2,
+        .fp_start_grace_sec = 2,
+        .fp_end_grace_sec = 2,
+        .fill_gaps_limit_sec = 2,
     };
 
     const fp_sec = try calcFalsePositiveSec(std.testing.allocator, vad_segment, config);

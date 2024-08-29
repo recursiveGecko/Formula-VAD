@@ -228,6 +228,108 @@ pub fn readParseAudacitySegments(
     return ref_segments;
 }
 
-test {
-    _ = statistics;
+const t = std.testing;
+
+test "Evaluator/statistics integration test" {
+    var ref_segments = [_]SpeechSegment{
+        SpeechSegment{
+            .side = .ref,
+            .id = 1,
+            .from_sec = 2,
+            .to_sec = 4,
+        },
+        SpeechSegment{
+            .side = .ref,
+            .id = 2,
+            .from_sec = 5,
+            .to_sec = 7,
+        },
+        SpeechSegment{
+            .side = .ref,
+            .id = 3,
+            .from_sec = 10,
+            .to_sec = 20,
+        },
+    };
+
+    var detected_segments = [_]SpeechSegment{
+        SpeechSegment{
+            .side = .vad,
+            .id = 1,
+            // 1.5 seconds too early
+            .from_sec = 0.5,
+            // 0.5s too late
+            .to_sec = 4.5,
+        },
+        SpeechSegment{
+            .side = .vad,
+            .id = 2,
+            // 1s late
+            .from_sec = 6,
+            // exact
+            .to_sec = 7,
+        },
+        SpeechSegment{
+            .side = .vad,
+            .id = 3,
+            // exact
+            .from_sec = 10,
+            // 3s "early", continued...
+            .to_sec = 12,
+        },
+        SpeechSegment{
+            .side = .vad,
+            .id = 4,
+            // ... continued after 2s
+            .from_sec = 14,
+            // exact
+            .to_sec = 20,
+        },
+        SpeechSegment{
+            .side = .vad,
+            .id = 5,
+            // false detection
+            .from_sec = 100,
+            .to_sec = 100.3,
+        },
+        SpeechSegment{
+            .side = .vad,
+            .id = 6,
+            // 2nd false detection
+            .from_sec = 101,
+            .to_sec = 101.3,
+        },
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var result = try evaluate(
+        arena.allocator(),
+        .{
+            .ignore_shorter_than_sec = 0,
+            .fill_gaps_limit_sec = 0.1,
+            .fp_start_grace_sec = 2,
+            .fp_end_grace_sec = 2,
+        },
+        &detected_segments,
+        &ref_segments,
+    );
+    defer result.deinit();
+
+    // std.debug.print("stats: {any}\n", .{result.stats});
+
+    // detected segment starting 1.5s too early and ending 0.5s too late adds 2s to total positives (ref segments are 14s long)
+    try t.expectApproxEqAbs(16, result.stats.total_positives_sec, 0.01);
+
+    try t.expectApproxEqAbs(13, result.stats.true_positives_sec, 0.01);
+    try t.expectEqual(4, result.stats.true_positives_count);
+
+    // 0.3s, 0.3s FP
+    try t.expectApproxEqAbs(0.6, result.stats.false_positives_sec, 0.01);
+    try t.expectEqual(2, result.stats.false_positives_count);
+
+    // 1s late start; 2s gap
+    try t.expectApproxEqAbs(3, result.stats.false_negatives_sec, 0.01);
+    try t.expectEqual(2, result.stats.false_negatives_count);
 }
