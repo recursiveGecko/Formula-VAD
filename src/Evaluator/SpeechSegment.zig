@@ -40,16 +40,16 @@ pub fn toComment(self: Self, allocator: Allocator) ![]const u8 {
 }
 
 pub fn findOverlapping(allocator: Allocator, target: *Self, others: []Self) ![]*Self {
-    var overlapping = ArrayList(*Self).init(allocator);
-    errdefer overlapping.deinit();
+    var overlapping: ArrayList(*Self) = .empty;
+    errdefer overlapping.deinit(allocator);
 
     for (others) |*other| {
         if (target.overlapWith(other.*) > 0.0) {
-            try overlapping.append(other);
+            try overlapping.append(allocator, other);
         }
     }
 
-    return overlapping.toOwnedSlice();
+    return overlapping.toOwnedSlice(allocator);
 }
 
 pub fn sortByStart(_ctx: void, lhs: Self, rhs: Self) bool {

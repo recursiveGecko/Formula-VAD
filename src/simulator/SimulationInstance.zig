@@ -212,7 +212,7 @@ fn simulateVAD(self: *Self) ![]AudioPipeline.SpeechSegment {
     }
 
     // Gather VAD segments
-    const vad_segments = try pipeline.vad_machine.vad_segments.toOwnedSlice();
+    const vad_segments = try pipeline.vad_machine.vad_segments.toOwnedSlice(instance_alloc);
     errdefer instance_alloc.free(vad_segments);
 
     if (self.vad_data_logger) |conn| {

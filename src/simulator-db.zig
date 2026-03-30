@@ -13,10 +13,6 @@ const report_generator = @import("./simulator/report_generator.zig");
 const fs = std.fs;
 const log = std.log.scoped(.db_simulator);
 const exit = std.process.exit;
-const stderr = std.io.getStdErr();
-const stdout = std.io.getStdOut();
-const stderr_w = stdout.writer();
-const stdout_w = stdout.writer();
 const megabyte = 1024 * 1024;
 
 /// stdlib option overrides
@@ -57,7 +53,7 @@ const cli_params = clap.parseParamsComptime(
 );
 
 fn printHelp() !void {
-    try clap.help(stdout_w, clap.Help, &cli_params, .{});
+    try clap.helpToFile(.stdout(), clap.Help, &cli_params, .{});
 }
 
 /// Entrypoint for CLI invocation
@@ -68,6 +64,12 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(gpa.allocator());
     defer arena.deinit();
     const arena_alloc = arena.allocator();
+    var stdout_buf: [4096]u8 = undefined;
+    var stderr_buf: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    var stderr_writer = std.fs.File.stderr().writer(&stderr_buf);
+    const stdout = &stdout_writer.interface;
+    const stderr = &stderr_writer.interface;
 
     const arg_parsers = .{
         .str = clap.parsers.string,
@@ -79,7 +81,7 @@ pub fn main() !void {
         .diagnostic = &diag,
     }) catch |err| {
         try printHelp();
-        diag.report(stderr.writer(), err) catch {};
+        diag.reportToFile(.stderr(), err) catch {};
         exit(1);
     };
 
@@ -111,7 +113,8 @@ pub fn main() !void {
     defer vad_logger.deinit();
 
     var sim = try initialize(arena_alloc, vad_logger, cli_args);
-    try stderr_w.print("Using config: {any}\n", .{sim.config});
+    try stderr.print("Using config: {any}\n", .{sim.config});
+    try stderr.flush();
 
     var eval_results = try arena_alloc.alloc(Evaluator.Result, sim.instances.len);
     for (sim.instances, 0..) |*instance, i| {
@@ -120,7 +123,8 @@ pub fn main() !void {
 
     const report = try report_generator.bufPrintSimulationReport(arena_alloc, eval_results, .plain);
 
-    try stdout_w.writeAll(report);
+    try stdout.writeAll(report);
+    try stdout.flush();
 
     // // Generate output and report
     // _ = try maybeSaveOutput(arena_alloc, simulation);
@@ -133,7 +137,7 @@ pub fn main() !void {
 fn initialize(arena_alloc: std.mem.Allocator, conn: *DataLogger.VADDataLogger, cli_args: CLIArgs) !Simulation {
     // Find all StreamInfos
     const all_stream_infos = val: {
-        var list = std.ArrayList(DataLogger.StreamInfo).init(arena_alloc);
+        var list: std.ArrayList(DataLogger.StreamInfo) = .empty;
 
         // Fetch in batches of 25
         var last_id: ?i32 = null;
@@ -144,11 +148,11 @@ fn initialize(arena_alloc: std.mem.Allocator, conn: *DataLogger.VADDataLogger, c
             if (db_slice.len == 0) break;
             last_id = db_slice[db_slice.len - 1].id;
 
-            const list_slice = try list.addManyAsSlice(db_slice.len);
+            const list_slice = try list.addManyAsSlice(arena_alloc, db_slice.len);
             @memcpy(list_slice, db_slice);
         }
 
-        break :val try list.toOwnedSlice();
+        break :val try list.toOwnedSlice(arena_alloc);
     };
     const instances = try arena_alloc.alloc(DBSimulationInstance, all_stream_infos.len);
 
@@ -158,7 +162,7 @@ fn initialize(arena_alloc: std.mem.Allocator, conn: *DataLogger.VADDataLogger, c
 
         // Find all reference segments
         const ref_segments = val: {
-            var list = std.ArrayList(Evaluator.SpeechSegment).init(arena_alloc);
+            var list: std.ArrayList(Evaluator.SpeechSegment) = .empty;
 
             // Fetch in batches of 25
             var last_id: ?i32 = null;
@@ -169,7 +173,7 @@ fn initialize(arena_alloc: std.mem.Allocator, conn: *DataLogger.VADDataLogger, c
                 if (db_slice.len == 0) break;
                 last_id = db_slice[db_slice.len - 1].id;
 
-                const list_slice = try list.addManyAsSlice(db_slice.len);
+                const list_slice = try list.addManyAsSlice(arena_alloc, db_slice.len);
                 for (db_slice, 0..) |ref_segment, i_seg| {
                     list_slice[i_seg] = Evaluator.SpeechSegment{
                         .side = .ref,
@@ -179,7 +183,7 @@ fn initialize(arena_alloc: std.mem.Allocator, conn: *DataLogger.VADDataLogger, c
                 }
             }
 
-            break :val try list.toOwnedSlice();
+            break :val try list.toOwnedSlice(arena_alloc);
         };
 
         instances[i] = DBSimulationInstance{
@@ -244,7 +248,7 @@ fn runInstance(
 
     // Evaluate results
     const result = val: {
-        const vad_segments = try silero_vad_machine.vad_segments.toOwnedSlice();
+        const vad_segments = try silero_vad_machine.vad_segments.toOwnedSlice(arena_alloc);
         var speech_segments = try arena_alloc.alloc(Evaluator.SpeechSegment, vad_segments.len);
 
         const sample_rate = instance.stream_info.sample_rate;

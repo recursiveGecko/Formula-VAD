@@ -42,10 +42,10 @@ pub const Processor = struct {
 
         // Check that the context is a pointer
         const ctx_info = @typeInfo(@TypeOf(ctx));
-        if (ctx_info != .Pointer) @compileError(err);
+        if (ctx_info != .pointer) @compileError(err);
 
         // Extract the type it's pointing to
-        const ChildType = ctx_info.Pointer.child;
+        const ChildType = ctx_info.pointer.child;
 
         // Define what the the `process` function is supposed to look like
         const ExpectedProcessFn = processFnType(*ChildType);
@@ -83,7 +83,7 @@ pub const Processor = struct {
     fn processFnType(CtxType: type) type {
         const ctx_info = @typeInfo(CtxType);
 
-        if (ctx_info != .Pointer) {
+        if (ctx_info != .pointer) {
             @compileError("CtxType must be a pointer, but it's " ++ @typeName(ctx_info));
         }
 
@@ -260,7 +260,7 @@ pub fn write(self: *Self, prev_result: *const Result) !void {
             // we consumed the entire input
             break;
         } else if (n_consumed_input > prev_result.segment.length()) {
-            @setCold(true);
+            @branchHint(.cold);
             // This might indicate that another part of the program is trampling over the memory
             // referenced by prev_result.
             std.debug.panic(
@@ -384,8 +384,8 @@ test "BufferedStep chain" {
                     .metadata = .{},
                     .segment = &self.out_segment,
                 },
-                .test_samples = std.ArrayList(f32).init(allocator),
-                .test_indices = std.ArrayList(usize).init(allocator),
+                .test_samples = .empty,
+                .test_indices = .empty,
             };
 
             return self;
@@ -393,8 +393,8 @@ test "BufferedStep chain" {
 
         pub fn deinit(self: *@This()) void {
             self.out_segment.deinit();
-            self.test_samples.deinit();
-            self.test_indices.deinit();
+            self.test_samples.deinit(self.allocator);
+            self.test_indices.deinit(self.allocator);
             self.allocator.destroy(self);
         }
 
@@ -402,7 +402,7 @@ test "BufferedStep chain" {
             const in_channels = prev_result.segment.channel_pcm_buf;
             const out_channel = self.out_segment.writablePCM()[0];
 
-            const test_samples_slice = self.test_samples.addManyAsSlice(out_channel.len) catch @panic("nooo");
+            const test_samples_slice = self.test_samples.addManyAsSlice(self.allocator, out_channel.len) catch @panic("nooo");
 
             for (0..prev_result.segment.length()) |i_sample| {
                 var sum: f32 = 0;
@@ -421,7 +421,7 @@ test "BufferedStep chain" {
             self.out_segment.index = prev_result.segment.index;
 
             // capture output for testing
-            const out_index = self.test_indices.addOne() catch @panic("nooo");
+            const out_index = self.test_indices.addOne(self.allocator) catch @panic("nooo");
             out_index.* = self.out_segment.index;
 
             return &self.out_result;
@@ -461,8 +461,8 @@ test "BufferedStep chain" {
                     .metadata = .{},
                     .segment = &self.out_segment,
                 },
-                .test_samples = std.ArrayList(f32).init(allocator),
-                .test_indices = std.ArrayList(usize).init(allocator),
+                .test_samples = .empty,
+                .test_indices = .empty,
                 .downsample_rate = downsample_rate,
             };
 
@@ -471,8 +471,8 @@ test "BufferedStep chain" {
 
         pub fn deinit(self: *@This()) void {
             self.out_segment.deinit();
-            self.test_samples.deinit();
-            self.test_indices.deinit();
+            self.test_samples.deinit(self.allocator);
+            self.test_indices.deinit(self.allocator);
             self.allocator.destroy(self);
         }
 
@@ -483,7 +483,7 @@ test "BufferedStep chain" {
             const in_slice = prev_result.segment.channel_pcm_buf[0];
             const out_slice = self.out_segment.writablePCM()[0];
 
-            const test_samples_slice = self.test_samples.addManyAsSlice(out_slice.len) catch @panic("nooo");
+            const test_samples_slice = self.test_samples.addManyAsSlice(self.allocator, out_slice.len) catch @panic("nooo");
 
             for (0..out_slice.len) |i| {
                 out_slice[i] = in_slice[i * self.downsample_rate];
@@ -496,7 +496,7 @@ test "BufferedStep chain" {
             };
 
             // capture output for testing
-            const out_index = self.test_indices.addOne() catch @panic("nooo");
+            const out_index = self.test_indices.addOne(self.allocator) catch @panic("nooo");
             out_index.* = self.out_segment.index;
 
             return &self.out_result;
@@ -526,8 +526,8 @@ test "BufferedStep chain" {
                     .metadata = .{},
                     .segment = &self.out_segment,
                 },
-                .test_samples = std.ArrayList(f32).init(allocator),
-                .test_indices = std.ArrayList(usize).init(allocator),
+                .test_samples = .empty,
+                .test_indices = .empty,
             };
 
             return self;
@@ -535,8 +535,8 @@ test "BufferedStep chain" {
 
         pub fn deinit(self: *@This()) void {
             self.out_segment.deinit();
-            self.test_samples.deinit();
-            self.test_indices.deinit();
+            self.test_samples.deinit(self.allocator);
+            self.test_indices.deinit(self.allocator);
             self.allocator.destroy(self);
         }
 
@@ -552,7 +552,7 @@ test "BufferedStep chain" {
             const out_slice = self.out_segment.writablePCM()[0];
 
             // capture output for testing
-            const test_samples_slice = self.test_samples.addManyAsSlice(out_slice.len) catch @panic("nooo");
+            const test_samples_slice = self.test_samples.addManyAsSlice(self.allocator, out_slice.len) catch @panic("nooo");
 
             for (0..in_slice.len) |i| {
                 out_slice[i] = in_slice[i] * 2;
@@ -563,7 +563,7 @@ test "BufferedStep chain" {
             self.out_segment.index = prev_result.segment.index;
 
             // capture output for testing
-            const out_index = self.test_indices.addOne() catch @panic("nooo");
+            const out_index = self.test_indices.addOne(self.allocator) catch @panic("nooo");
             out_index.* = self.out_segment.index;
 
             return &self.out_result;

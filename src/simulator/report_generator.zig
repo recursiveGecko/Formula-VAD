@@ -37,12 +37,12 @@ pub fn bufPrintSimulationReport(
 ) ![]const u8 {
     _ = format; // autofix
 
-    var array_buf = ArrayList(u8).init(allocator);
-    const writer = array_buf.writer();
+    var array_buf: ArrayList(u8) = .empty;
+    const writer = array_buf.writer(allocator);
 
     // Aggregate results and print them
-    var all_stats_list = std.ArrayList(SingleStats).init(allocator);
-    errdefer all_stats_list.deinit();
+    var all_stats_list: std.ArrayList(SingleStats) = .empty;
+    errdefer all_stats_list.deinit(allocator);
 
     try writer.print("\n\n=> Definitions\n\n{s}", .{definitions});
     try writer.print("\n\n=> Performance Report\n\n", .{});
@@ -51,7 +51,7 @@ pub fn bufPrintSimulationReport(
 
     for (eval_results) |result| {
         const stats = result.stats;
-        try all_stats_list.append(stats);
+        try all_stats_list.append(allocator, stats);
 
         try writer.print(table_row_fmt, .{
             result.name orelse "<null>",
@@ -67,7 +67,7 @@ pub fn bufPrintSimulationReport(
         });
     }
 
-    const all_stats = try all_stats_list.toOwnedSlice();
+    const all_stats = try all_stats_list.toOwnedSlice(allocator);
     defer allocator.free(all_stats);
 
     const agg = statistics.aggregate(all_stats);
@@ -120,5 +120,5 @@ pub fn bufPrintSimulationReport(
     try writer.print("F-Score (β = {d: >5.2})         :   {d: >5.1}% \n", .{ agg.f_score_beta, agg.f_score * 100 });
     try writer.print("Fowlkes-Mallows index       :   {d: >5.1}% \n", .{agg.fm_index * 100});
 
-    return array_buf.toOwnedSlice();
+    return array_buf.toOwnedSlice(allocator);
 }

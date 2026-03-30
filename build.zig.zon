@@ -1,5 +1,5 @@
 .{
-    .name = "formula-vad",
+    .name = .formula_vad,
     .version = "1.2.0",
     .paths = .{
         "src",
@@ -9,34 +9,35 @@
         "README.md",
         "LICENSE.txt",
     },
+    .fingerprint = 0xf6ae76b249deb93a,
     .dependencies = .{
         .clap = .{
-            .url = "git+https://github.com/Hejsil/zig-clap#0.9.1",
-            .hash = "122062d301a203d003547b414237229b09a7980095061697349f8bef41be9c30266b",
-        },
-        .zig_onnxruntime = .{
-            .url = "git+https://github.com/recursiveGecko/onnxruntime.zig#b7456c17ac273833dd26df2ab200b1c88530fe4a",
-            .hash = "12201ba0d4e260c46b067389b77bc9d3a0dcc0cd6e626151914f55d7878a8abf19df",
+            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.11.0.tar.gz",
+            .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
         },
         .kissfft = .{
-            .url = "git+https://github.com/mborgerding/kissfft#131.1.0",
-            .hash = "1220eea11a01b53477705a7306fb582e7e6a73bfb2c71d4df178eea7909e44133a90",
+            .url = "https://github.com/mborgerding/kissfft/archive/refs/tags/131.2.0.tar.gz",
+            .hash = "N-V-__8AACTIAgDvwMtvVJd0dbgW3kCCo6MLQZ_gyqEPRnxK",
         },
         .deepfilternet = .{
             .url = "https://github.com/recursiveGecko/libdeepfilter-builds/releases/download/prerelease-f1d19bffbeccd98a616f23c89903a2386a1d1dba/libdeepfilter-f1d19bff-x86_64-unknown-linux-gnu.tar.gz",
-            .hash = "122011b85fa50ca17bdee6ff9aced25c898db9ba2ba85f966862db5b02d60d39eef2",
+            .hash = "N-V-__8AAHS0oQcRuF-lDKF73ub_ms7SXImNuborqF-WaGLb",
         },
         .zuckdb = .{
-            .url = "git+https://github.com/karlseguin/zuckdb.zig#9b62c3fd6e77196245f260021e836ab136e28b7a",
-            .hash = "1220f89a531cb5154b9c3846b5705a9ad5570bfec77e3cc466a0bb91889a5c88e8c8",
+            .url = "git+https://github.com/karlseguin/zuckdb.zig#54a22ace9db98cd97fba7f2fdd8fe16de07335ca",
+            .hash = "zuckdb-0.0.0-DpSXVNc4BgBkAOzXQcNkOwctDLGlKtnLnIUepn2I_S-g",
         },
-        // .zuckdb = .{
-        //     .url = "git+https://github.com/recursiveGecko/zuckdb.zig#fix/appender-optional",
-        //     .hash = "1220f89a531cb5154b9c3846b5705a9ad5570bfec77e3cc466a0bb91889a5c88e8c8",
-        // },
         .duckdb_linux_x64 = .{
-            .url = "https://github.com/duckdb/duckdb/releases/download/v1.0.0/libduckdb-linux-amd64.zip",
-            .hash = "1220926571e3731d1134caa34533f405a9270758a8b2a534699fd94d6d4bfe513fc4",
+            .url = "https://github.com/duckdb/duckdb/releases/download/v1.5.1/libduckdb-linux-amd64.zip",
+            .hash = "N-V-__8AAIYoBAni1pzQj_MHX4lw2wBDmdk5J_Ac96YrIx6f",
+        },
+        .onnxruntime_zig = .{
+            .url = "git+https://github.com/recursiveGecko/onnxruntime.zig#47e7571c969971a5c4b5889e7ae1a454720a36d1",
+            .hash = "onnxruntime_zig-0.3.0-kIOLNTx2AAD7B_ZrVzTl3vvbvyosN6UdOV25udNEJct5",
+        },
+        .onnxruntime_linux_x64 = .{
+            .url = "https://github.com/microsoft/onnxruntime/releases/download/v1.23.2/onnxruntime-linux-x64-1.23.2.tgz",
+            .hash = "N-V-__8AAJbJZQGFn677vLKS7SrSNIWEhZYu5B0mr7m9IIqR",
         },
     },
 }

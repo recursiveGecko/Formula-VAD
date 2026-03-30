@@ -12,10 +12,6 @@ const Thread = std.Thread;
 const fs = std.fs;
 const log = std.log.scoped(.simulator);
 const exit = std.process.exit;
-const stderr = std.io.getStdErr();
-const stdout = std.io.getStdOut();
-const stderr_w = stdout.writer();
-const stdout_w = stdout.writer();
 const megabyte = 1024 * 1024;
 const seconds_per_hour = 3600;
 
@@ -86,7 +82,7 @@ const cli_params = clap.parseParamsComptime(
 );
 
 fn printHelp() !void {
-    try clap.help(stdout_w, clap.Help, &cli_params, .{});
+    try clap.helpToFile(.stdout(), clap.Help, &cli_params, .{});
 }
 
 /// Entrypoint for CLI invocation
@@ -98,6 +94,12 @@ pub fn main() !void {
     var thread_safe_arena = std.heap.ThreadSafeAllocator{ .child_allocator = unsafe_arena.allocator() };
     const arena_alloc = thread_safe_arena.allocator();
     defer unsafe_arena.deinit();
+    var stdout_buf: [4096]u8 = undefined;
+    var stderr_buf: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    var stderr_writer = std.fs.File.stderr().writer(&stderr_buf);
+    const stdout = &stdout_writer.interface;
+    const stderr = &stderr_writer.interface;
 
     const arg_parsers = .{
         .str = clap.parsers.string,
@@ -110,7 +112,7 @@ pub fn main() !void {
         .diagnostic = &diag,
     }) catch |err| {
         try printHelp();
-        diag.report(stderr.writer(), err) catch {};
+        diag.reportToFile(.stderr(), err) catch {};
         exit(1);
     };
 
@@ -133,7 +135,8 @@ pub fn main() !void {
     // Initialize and run the simulation
 
     var simulation = initialize(arena_alloc, gpa.allocator(), cli_args) catch |err| {
-        try stderr_w.print("Failed to initialize simulation: {}\n", .{err});
+        try stderr.print("Failed to initialize simulation: {}\n", .{err});
+        try stderr.flush();
         exit(1);
     };
     defer simulation.deinit();
@@ -146,7 +149,8 @@ pub fn main() !void {
     }
 
     const report = try report_generator.bufPrintSimulationReport(arena_alloc, results, .plain);
-    try stdout_w.writeAll(report);
+    try stdout.writeAll(report);
+    try stdout.flush();
 
     // Generate output and report
     _ = try maybeSaveOutput(arena_alloc, simulation);

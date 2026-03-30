@@ -100,7 +100,7 @@ pub fn init(allocator: Allocator, config: Config, pipeline_config: AudioPipeline
     errdefer channel_vol_ratio.deinit();
 
     var vad_segments = try std.ArrayList(AudioPipeline.SpeechSegment).initCapacity(allocator, 100);
-    errdefer vad_segments.deinit();
+    errdefer vad_segments.deinit(allocator);
 
     const self = Self{
         .allocator = allocator,
@@ -119,7 +119,7 @@ pub fn deinit(self: *Self) void {
     self.long_term_speech_volume.deinit();
     self.short_term_speech_volume.deinit();
     self.channel_vol_ratio.deinit();
-    self.vad_segments.deinit();
+    self.vad_segments.deinit(self.allocator);
 }
 
 pub fn run(
@@ -263,7 +263,7 @@ fn onSpeechEnd(self: *Self) !Result {
             .avg_channel_vol_ratio = avg_channel_vol_ratio,
             .vad_met_sec = self.vad_threshold_met_cumulative_sec,
         };
-        _ = try self.vad_segments.append(segment);
+        try self.vad_segments.append(self.allocator, segment);
 
         log.info(
             "VAD Segment: {d: >6.2}s  | Avg. vol ratio: {d: >5.2} ({d: >4}) | Actual VAD duration: {d: >4.1}s ",

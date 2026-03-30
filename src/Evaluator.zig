@@ -9,8 +9,6 @@ pub const formats = @import("./Evaluator/formats.zig");
 pub const report_generator = @import("./simulator/report_generator.zig");
 const simulator = @import("./simulator.zig");
 const exit = std.process.exit;
-const stderr = std.io.getStdErr();
-const stdout = std.io.getStdOut();
 const megabyte = 1024 * 1024;
 
 const params = clap.parseParamsComptime(
@@ -38,7 +36,9 @@ const ResultJson = struct {
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var allocator = gpa.allocator();
-    var stdout_w = stdout.writer();
+    var stdout_buf: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    const stdout = &stdout_writer.interface;
 
     const arg_parsers = .{
         .path = clap.parsers.string,
@@ -51,7 +51,7 @@ pub fn main() !void {
         .diagnostic = &diag,
     }) catch |err| {
         try printHelp();
-        diag.report(stderr.writer(), err) catch {};
+        diag.reportToFile(.stderr(), err) catch {};
         exit(1);
     };
     defer clap_res.deinit();
@@ -88,17 +88,17 @@ pub fn main() !void {
 
     switch (format) {
         .plain => {
-            try stdout_w.print("\n=> Definitions: \n\n", .{});
-            try stdout_w.writeAll(report_generator.definitions);
-            try stdout_w.print("\n\n=> Report: \n\n", .{});
-            try stdout_w.print("Total speech duration  (P):  {d: >5.1} sec\n", .{stats.total_positives_sec});
-            try stdout_w.print("True positives        (TP):  {d: >5.1} sec\n", .{stats.true_positives_sec});
-            try stdout_w.print("False positives       (FP):  {d: >5.1} sec\n", .{stats.false_positives_sec});
-            try stdout_w.print("False negatives       (FN):  {d: >5.1} sec\n", .{stats.false_negatives_sec});
-            try stdout_w.print("True positive rate   (TPR):  {d: >6.2} %\n", .{stats.true_positive_rate * 100});
-            try stdout_w.print("Precision            (PPV):  {d: >6.2} %\n", .{stats.precision * 100});
-            try stdout_w.print("False negative rate  (FNR):  {d: >6.2} %\n", .{stats.false_negative_rate * 100});
-            try stdout_w.print("False discovery rate (FDR):  {d: >6.2} %\n", .{stats.false_discovery_rate * 100});
+            try stdout.print("\n=> Definitions: \n\n", .{});
+            try stdout.writeAll(report_generator.definitions);
+            try stdout.print("\n\n=> Report: \n\n", .{});
+            try stdout.print("Total speech duration  (P):  {d: >5.1} sec\n", .{stats.total_positives_sec});
+            try stdout.print("True positives        (TP):  {d: >5.1} sec\n", .{stats.true_positives_sec});
+            try stdout.print("False positives       (FP):  {d: >5.1} sec\n", .{stats.false_positives_sec});
+            try stdout.print("False negatives       (FN):  {d: >5.1} sec\n", .{stats.false_negatives_sec});
+            try stdout.print("True positive rate   (TPR):  {d: >6.2} %\n", .{stats.true_positive_rate * 100});
+            try stdout.print("Precision            (PPV):  {d: >6.2} %\n", .{stats.precision * 100});
+            try stdout.print("False negative rate  (FNR):  {d: >6.2} %\n", .{stats.false_negative_rate * 100});
+            try stdout.print("False discovery rate (FDR):  {d: >6.2} %\n", .{stats.false_discovery_rate * 100});
         },
         .json => {
             const res = ResultJson{
@@ -114,14 +114,19 @@ pub fn main() !void {
                 .FDR = stats.false_discovery_rate,
             };
 
-            try std.json.stringify(res, .{}, stdout_w);
-            try stdout_w.writeAll("\n");
+            var out: std.Io.Writer.Allocating = .init(allocator);
+            defer out.deinit();
+            try std.json.Stringify.value(res, .{}, &out.writer);
+            try stdout.writeAll(out.written());
+            try stdout.writeAll("\n");
         },
     }
+
+    try stdout.flush();
 }
 
 fn printHelp() !void {
-    try clap.help(stdout.writer(), clap.Help, &params, .{});
+    try clap.helpToFile(.stdout(), clap.Help, &params, .{});
 }
 
 pub const Result = struct {

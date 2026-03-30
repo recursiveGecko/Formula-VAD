@@ -77,17 +77,7 @@ pub const UUID = struct {
         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     };
 
-    pub fn format(
-        self: UUID,
-        comptime layout: []const u8,
-        options: fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = options; // currently unused
-
-        if (layout.len != 0 and layout[0] != 's')
-            @compileError("Unsupported format specifier for UUID type: '" ++ layout ++ "'.");
-
+    pub fn format(self: UUID, writer: *std.io.Writer) std.io.Writer.Error!void {
         var buf: [36]u8 = undefined;
         const hex = "0123456789abcdef";
 
@@ -100,7 +90,7 @@ pub const UUID = struct {
             buf[i + 1] = hex[self.bytes[j] & 0x0f];
         }
 
-        try fmt.format(writer, "{s}", .{buf});
+        try writer.writeAll(&buf);
     }
 
     pub fn parse(buf: []const u8) Error!UUID {
@@ -141,7 +131,7 @@ test "parse and format" {
     };
 
     for (uuids) |uuid| {
-        try testing.expectFmt(uuid, "{}", .{try UUID.parse(uuid)});
+        try testing.expectFmt(uuid, "{f}", .{try UUID.parse(uuid)});
     }
 }
 

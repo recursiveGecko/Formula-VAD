@@ -22,8 +22,8 @@ pub fn rmsVolume(samples: []const f32) f32 {
 /// Converts time in seconds to sample number
 pub fn secondsToSamples(sec: anytype, sample_rate: usize) u64 {
     const sec_f: f32 = switch (@typeInfo(@TypeOf(sec))) {
-        .Int => @floatFromInt(sec),
-        .Float => @floatCast(sec),
+        .int => @floatFromInt(sec),
+        .float => @floatCast(sec),
         inline else => @compileError("Invalid `secondsToSamples` argument"),
     };
 
@@ -35,8 +35,8 @@ pub fn secondsToSamples(sec: anytype, sample_rate: usize) u64 {
 /// Converts sample number to time in seconds
 pub fn samplesToSeconds(samples: anytype, sample_rate: usize) f32 {
     const samples_f: f32 = switch (@typeInfo(@TypeOf(samples))) {
-        .Int => @floatFromInt(samples),
-        .Float => @floatCast(samples),
+        .int => @floatFromInt(samples),
+        .float => @floatCast(samples),
         inline else => @compileError("Invalid `samplesToSeconds` argument"),
     };
 

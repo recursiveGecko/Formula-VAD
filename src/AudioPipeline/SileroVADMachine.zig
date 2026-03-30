@@ -82,14 +82,14 @@ pub fn init(
         .config = config,
         .root_sr_mul = root_sr_mul,
         .sample_rate = sample_rate,
-        .vad_segments = std.ArrayList(AudioPipeline.SpeechSegment).init(allocator),
+        .vad_segments = .empty,
         .rolling_speech_band_vol = rolling_speech_band_vol,
     };
 }
 
 pub fn deinit(self: *SileroVADMachine) void {
     self.rolling_speech_band_vol.deinit();
-    self.vad_segments.deinit();
+    self.vad_segments.deinit(self.allocator);
 }
 
 pub fn run(
@@ -220,7 +220,7 @@ pub fn run2(
                         .avg_channel_vol_ratio = 0,
                         .vad_met_sec = 0,
                     };
-                    _ = try self.vad_segments.append(segment);
+                    try self.vad_segments.append(self.allocator, segment);
 
                     return Result{
                         .recording_state = .completed,

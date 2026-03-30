@@ -96,10 +96,10 @@ pub fn process(self: *Self, prev_result: *const BufferedStep.Result) *const Buff
     const n_channels = in_segment.channel_pcm_buf.len;
 
     if (n_channels != self.audio_config.in_channels) {
-        @setCold(true);
+        @branchHint(.cold);
         std.debug.panic("BufferedMixer received {d} channels, expected {d}", .{ n_channels, self.audio_config.in_channels });
     } else if (in_segment.length() != self.audio_config.buffer_size) {
-        @setCold(true);
+        @branchHint(.cold);
         std.debug.panic("BufferedMixer received {d} samples, expected {d}", .{ in_segment.length(), self.audio_config.buffer_size.? });
     }
 

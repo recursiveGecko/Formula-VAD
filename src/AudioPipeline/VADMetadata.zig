@@ -34,7 +34,7 @@ pub fn toResult(self: *Self) Result {
 }
 
 pub fn push(self: *Self, values: anytype, weight_any: anytype) void {
-    const weight = if (@typeInfo(@TypeOf(weight_any)) == .Int)
+    const weight = if (@typeInfo(@TypeOf(weight_any)) == .int)
         @as(f32, @floatFromInt(weight_any))
     else
         weight_any;
@@ -77,7 +77,7 @@ pub fn push(self: *Self, values: anytype, weight_any: anytype) void {
 fn getValueOrNull(comptime T: type, obj: anytype, comptime field: []const u8) ?T {
     const T_info = @typeInfo(T);
 
-    const TNonOptional = if (T_info == .Optional) T_info.Optional.child else T;
+    const TNonOptional = if (T_info == .optional) T_info.optional.child else T;
 
     const TObj = @TypeOf(obj);
     if (!@hasField(TObj, field)) return null;
@@ -86,7 +86,7 @@ fn getValueOrNull(comptime T: type, obj: anytype, comptime field: []const u8) ?T
     if (maybe_val == null) return null;
 
     const val: TNonOptional = maybe_val.?;
-    if (@typeInfo(TNonOptional) == .Float and !std.math.isFinite(val)) {
+    if (@typeInfo(TNonOptional) == .float and !std.math.isFinite(val)) {
         return null;
     }
 

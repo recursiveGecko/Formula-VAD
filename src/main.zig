@@ -22,12 +22,14 @@ pub const std_options: std.Options = .{
 
 const log = std.log.scoped(.main);
 const exit = std.process.exit;
-const stdin = std.io.getStdIn();
-const stderr = std.io.getStdErr();
-const stdout = std.io.getStdOut();
-const stdin_r = stdin.reader();
-const stderr_w = stderr.writer();
-const stdout_w = stdout.writer();
+
+var stdin_buf: [4096]u8 = undefined;
+var stdout_buf: [4096]u8 = undefined;
+var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
+var stdout_witer = std.fs.File.stdout().writer(&stdout_buf);
+const stdin = &stdin_reader.interface;
+const stdout = &stdout_witer.interface;
+const StreamError = std.io.Reader.StreamError;
 
 const CommandAction = enum {
     segment,
@@ -81,8 +83,15 @@ const cli_params = clap.parseParamsComptime(
     \\
 );
 
+fn stringifyAlloc(allocator: Allocator, value: anytype) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+    try std.json.Stringify.value(value, .{}, &out.writer);
+    return out.toOwnedSlice();
+}
+
 fn printHelp() !void {
-    try clap.help(stderr_w, clap.Help, &cli_params, .{});
+    try clap.helpToFile(.stderr(), clap.Help, &cli_params, .{});
 }
 
 pub fn main() !void {
@@ -96,7 +105,7 @@ pub fn main() !void {
         .allocator = allocator,
     }) catch |err| {
         try printHelp();
-        diag.report(stderr.writer(), err) catch {};
+        diag.reportToFile(.stderr(), err) catch {};
         exit(1);
     };
     defer res.deinit();
@@ -174,20 +183,23 @@ pub fn startProcessLoop(process_loop: *ProcessLoopState) !void {
     var arena = std.heap.ArenaAllocator.init(process_loop.allocator);
     defer arena.deinit();
     const arena_alloc = arena.allocator();
-    const megabyte = 1024 * 1024;
 
     while (true) {
         defer _ = arena.reset(.retain_capacity);
 
-        const line = stdin_r.readUntilDelimiterAlloc(arena_alloc, '\n', megabyte) catch |err| {
+        var line_writer = std.Io.Writer.Allocating.init(arena_alloc);
+
+        _ = stdin.streamDelimiter(&line_writer.writer, '\n') catch |err| {
             const msg = try fmt.allocPrint(arena_alloc, "Error reading from standard input: {any}.", .{err});
             reportError(arena_alloc, msg, true);
 
-            if (err != error.StreamTooLong) {
+            if (err != error.EndOfStream) {
                 exit(1);
             }
             continue;
         };
+
+        const line = try line_writer.toOwnedSlice();
 
         const parsed = json.parseFromSliceLeaky(InCommandJSON, arena_alloc, line, .{}) catch |err| {
             const msg = try fmt.allocPrint(arena_alloc, "Error parsing command JSON: {any}. Line: {s}", .{ err, line });
@@ -314,8 +326,9 @@ fn reportError(
         .message = message,
         .fatal = fatal,
     };
-    const out_json = std.json.stringifyAlloc(arena_alloc, out, .{}) catch unreachable;
-    stdout_w.print("{s}\n", .{out_json}) catch unreachable;
+    const out_json = stringifyAlloc(arena_alloc, out) catch unreachable;
+    stdout.print("{s}\n", .{out_json}) catch unreachable;
+    stdout.flush() catch unreachable;
 }
 
 fn onRecording(
@@ -382,7 +395,7 @@ fn onRecording(
         // TODO: This is approximate, we could do better by exposing the internal VAD figure
         .speech_duration_ms = duration_ms - @min(duration_ms, 3500),
     };
-    const out_json = std.json.stringifyAlloc(arena_alloc, out, .{}) catch |err| {
+    const out_json = stringifyAlloc(arena_alloc, out) catch |err| {
         const msg = fmt.allocPrint(
             arena_alloc,
             "Error serializing output: {any}. Output: {any}",
@@ -393,7 +406,8 @@ fn onRecording(
         return;
     };
 
-    stdout_w.print("{s}\n", .{out_json}) catch unreachable;
+    stdout.print("{s}\n", .{out_json}) catch unreachable;
+    stdout.flush() catch unreachable;
 }
 
 test {

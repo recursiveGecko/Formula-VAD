@@ -62,7 +62,7 @@ Fowlkes-Mallows index     :    98.9%
 
 # Dependencies
 
-* Zig: `0.13.0`
+* Zig: `0.15.1`
 
 * libsndfile:
 

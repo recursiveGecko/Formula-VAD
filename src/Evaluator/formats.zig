@@ -9,16 +9,16 @@ pub fn parseAudacitySegments(
     txt: []const u8,
     side: SpeechSegment.Side,
 ) ![]SpeechSegment {
-    var segments = ArrayList(SpeechSegment).init(allocator);
-    errdefer segments.deinit();
+    var segments: ArrayList(SpeechSegment) = .empty;
+    errdefer segments.deinit(allocator);
 
     const no_cr = try std.mem.replaceOwned(u8, allocator, txt, "\r", "");
     defer allocator.free(no_cr);
 
-    var lines = std.mem.split(u8, no_cr, "\n");
+    var lines = std.mem.splitScalar(u8, no_cr, '\n');
 
     while (lines.next()) |line| {
-        var fields = std.mem.split(u8, line, "\t");
+        var fields = std.mem.splitScalar(u8, line, '\t');
 
         const from_str = fields.next() orelse continue;
         const to_str = fields.next() orelse continue;
@@ -33,16 +33,16 @@ pub fn parseAudacitySegments(
             .side = side,
         };
 
-        try segments.append(segment);
+        try segments.append(allocator, segment);
     }
 
-    return segments.toOwnedSlice();
+    return segments.toOwnedSlice(allocator);
 }
 
 pub fn serializeResultToAudacity(allocator: Allocator, result: Evaluator.Result) ![]const u8 {
-    var contents_array = std.ArrayList(u8).init(allocator);
-    var writer = contents_array.writer();
-    defer contents_array.deinit();
+    var contents_array: std.ArrayList(u8) = .empty;
+    var writer = contents_array.writer(allocator);
+    defer contents_array.deinit(allocator);
 
     for (result.input_segments) |segment| {
         const comment = try segment.toComment(allocator);
@@ -60,5 +60,5 @@ pub fn serializeResultToAudacity(allocator: Allocator, result: Evaluator.Result)
         try writer.print("{d:.4}\t{d:.4}\t{s}\n", .{ ref_segment.from_sec, ref_segment.to_sec, comment });
     }
 
-    return contents_array.toOwnedSlice();
+    return contents_array.toOwnedSlice(allocator);
 }
